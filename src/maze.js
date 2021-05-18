@@ -142,6 +142,9 @@
 // 超えたら。
 // 0より小さくなったり1より大きくなった時にこの処理を行う。OK.
 
+// まずstartは次数1なのでIS_PASSABLEなedgeはひとつだけ。で、それがcurrentEdge.
+// startがどっちであるかで最初のprgを決める。
+
 // 完成したらとりあえず↑キーで進めるようにしますね。
 
 /*
@@ -373,6 +376,7 @@ class Edge extends Component{
 	constructor(grid = 0){
 		super();
 		this.flag = undefined; // ゴールサーチ用
+    this.direction = 0; // 0から1へ向かう方向。
 	}
 	setFlag(_flag){
 		this.flag = _flag;
@@ -380,6 +384,14 @@ class Edge extends Component{
 	getFlag(){
 		return this.flag;
 	}
+  setDirection(){
+    const dx = this.connected[1].position.x - this.connected[0].position.x;
+    const dy = this.connected[1].position.y - this.connected[0].position.y;
+    this.direction = atan2(dy, dx);
+  }
+  getDirection(){
+    return this.direction;
+  }
 	getOther(v){
 		// 与えられた引数の頂点とは反対側の頂点を返す。
 		if(this.connected[0].getIndex() === v.getIndex()){ return this.connected[1]; }
@@ -414,7 +426,8 @@ class Maze{
 		this.prepareComponents(data); // 頂点の個数だけ入っててその分verticeを準備し端点として登録・・
 		this.start = undefined; // 最初の頂点を設定し、それよりvalueの大きな頂点で随時更新し続ける
 		this.goal = undefined; // valueの値を全部リセットしかつstartを起点としてサーチを進め、同じように更新し続ける感じ
-    this.playerPos = createVector();
+    //this.playerPos = createVector();
+    this._player = new Player();
     this.direction = 0;
 	}
 	prepareComponents(data){
@@ -441,6 +454,10 @@ class Maze{
 				e.regist(v);
 			}
 		}
+    // 0から1へ向かう方向を計算
+    for(let edg of this.edgeArray){
+      edg.setDirection();
+    }
 	}
 	initialize(seed = -1){
 		// 状態の初期化と起点の設定
@@ -494,7 +511,10 @@ class Maze{
 		this.searchGoal();
 		this.goal.setType(GOAL);
 		//console.log(this.goal.getValue());
-    this.playerPos.set(this.start.position.x, this.start.position.y, 0.5); // gridは掛けなくていい
+    // startから出ているIS_PASSABLEな唯一の辺をthis._playerにセットして
+    // かつプログレス(0か1)を与える。
+    this._player.setting(this.start);
+    //this.playerPos.set(this.start.position.x, this.start.position.y, 0.5); // gridは掛けなくていい
 		this.createMazeModel();
 	}
 	searchGoal(){
@@ -551,14 +571,14 @@ class Maze{
       // これはIS_NOT_PASSABLEのものすべてに対して90°回転で線分を作ってその上に外壁と同じようにしてやる感じですね。
       // まず床
       let index = 0;
-      for(let vts of this.verticeArray){
+      for(let vtc of this.verticeArray){
         // ±0.5で4つの点を用意する。xで-0.5に対しyで-0.5,+0.5でxで+0.5に対しyで-0.5,+0.5する、で、0,1,2の2,1,3する。
         for(let dx = -0.5; dx < 1; dx += 1){
           for(let dy = -0.5; dy < 1; dy += 1){
-            v.set(vts.position.x + dx, vts.position.y + dy, 0);
-            const _vtsType = vts.getType(); // 0,1,2.NORMAL,START,GOAL.
+            v.set(vtc.position.x + dx, vtc.position.y + dy, 0);
+            const _vtcType = vtc.getType(); // 0,1,2.NORMAL,START,GOAL.
             _geom.vertices.push(v.copy());
-            _geom.uvs.push(_vtsType + dx + 0.5, dy + 0.5);
+            _geom.uvs.push(_vtcType + dx + 0.5, dy + 0.5);
           }
         }
         _geom.faces.push(...[[index, index + 1, index + 2], [index + 2, index + 1, index + 3]]);
@@ -614,8 +634,9 @@ class Maze{
 	}
   update(){
     // ちょっとカメラ動かしてよ
-    if(keyIsDown(LEFT_ARROW)){ this.direction += 0.01 * TAU; }
-    if(keyIsDown(RIGHT_ARROW)){ this.direction -= 0.01 * TAU; }
+    //if(keyIsDown(LEFT_ARROW)){ this.direction += 0.01 * TAU; }
+    //if(keyIsDown(RIGHT_ARROW)){ this.direction -= 0.01 * TAU; }
+    this._player.update();
     // 正面行けないかな・・
     // まずプレイヤーがどのセルにいるかの情報に基づいてIS_PASSABLEなedgeの方向があるので、いくつかあるので、
     // それとdirectionで内積取って一番デカかったらそっちへ進むわけ。で、edgeの中におけるプログレスを記録しといて
@@ -628,11 +649,13 @@ class Maze{
     // カメラ？？
     // まずスタート位置にその・・
     const g = this.grid;
-    const px = this.playerPos.x * g;
-    const py = this.playerPos.y * g;
-    const pz = this.playerPos.z * g;
-    const dx = cos(this.direction) * g;
-    const dy = sin(this.direction) * g;
+    const pos = this._player.getPosition();
+    const dir = this._player.getDirection();
+    const px = pos.x * g;
+    const py = pos.y * g;
+    const pz = pos.z * g;
+    const dx = cos(dir) * g;
+    const dy = sin(dir) * g;
     const dz = 0;
     //console.log(px,py,pz);
     directionalLight(255, 255, 255, 1, 1, 1);
@@ -689,6 +712,117 @@ function createMazeData(w, h, grid){
 		data.connect.push(connectedData);
 	}
 	return data;
+}
+
+class Player{
+  constructor(){
+    this.currentEdge = undefined;
+    this.progress = 0;
+    this.from = createVector(0, 0);
+    this.to = createVector(0, 0);
+    this.currentEdgeDirection = 0;
+    this.position = createVector();
+    this.direction = 0;
+    this.lastVertice = undefined; // 最後に訪れた頂点。edgeの乗り換えの際に更新される感じ。
+    this.rotationSpeed = 0.01 * TAU;
+    this.speed = 0.03;
+  }
+  setting(start){
+    for(let edg of start.connected){
+      if(edg.getState() === IS_PASSABLE){
+        this.setEdge(edg);
+        if(start.getIndex() === edg.connected[0].getIndex()){ this.progress = 0; }else{ this.progress = 1; }
+        break;
+      }
+    }
+  }
+  setEdge(edg){
+    this.currentEdge = edg;
+    this.from = edg.connected[0].position;
+    this.to = edg.connected[1].position;
+    this.currentEdgeDirection = edg.getDirection();
+  }
+  update(){
+    if(keyIsDown(LEFT_ARROW)){ this.direction += this.rotationSpeed; }
+    else if(keyIsDown(RIGHT_ARROW)){ this.direction -= this.rotationSpeed; }
+    else if(keyIsDown(UP_ARROW)){ this.advance(); }
+    this.setPosition();
+  }
+  setLastVertice(vtc){
+    // たとえば、このときにイベントフラグをONにして・・・
+    this.lastVertice = vtc;
+  }
+  getLastVertice(vtc){
+    // 取得の際にフラグが立っていたら何かしらあっちで処理してフラグを折る、みたいなことが考えられる。
+    // ワナだったらその際に床で置き換えるなど。ああでも動的更新できない・・？？それは不必要だよ。
+    // ん－・・テクスチャでインチキして画像差し替えちゃえばできるよ（え）
+    return this.lastVertice;
+  }
+  advance(){
+    // prgを増減させる
+    const dir = this.direction;
+    const edgeDir = this.currentEdgeDirection;
+    const criterion = cos(dir - edgeDir);
+    if(criterion > 0){ this.progress += this.speed; }else{ this.progress -= this.speed; }
+    // ここでconstrainをやめる。
+    // 0より小さいか1より大きいか
+    // 乗り換えの際に候補のedgeがいくつか出現するのね
+    // verticeの今のedgeじゃないやつ(0～3個)のどれか。
+    // 乗り換えられるedgeが無いか、あっても進行方向に対して内積が負なら乗り換えは起きない。据え置き。
+    // ただし据え置きであってもlastVerticeは更新される。これをやらないとクリア判定できないので注意！！
+    // 正のものがあるなら乗り換えが起こる。cosが一番大きいものに乗り換える。progressも切り替える。
+    // その際にlastVertice（最後に訪れた頂点）を更新する。これをMaze側が取得、それに応じてイベントを発生させる。
+    // たとえばGOALならクリアみたいな感じ。
+    if(this.progress < 0 || this.progress > 1){
+      this.operation();
+    }
+  }
+  operation(){
+    //this.progress = constrain(this.progress, 0, 1);
+    // まずたどり着いた頂点をlastVerticeに設定
+    // 次にその頂点から伸びる辺でcurrentedgeでないものを洗い出す
+    // なければconstrainして処理は終了
+    // あればそれらについてこの頂点が1ならdirectionを反転させてから判定する
+    // cos(それ-this.direction)が負のものしかなければconstrainして処理は終了
+    // あれば一番大きいものを選びそのedgeにする
+    // あとはsetEdgeが全部やってくれる
+    // 要するにMAX取ってMAXが負ならやることない、正なら・・って感じ。
+    const index = (this.progress < 0 ? 0 : 1);
+    const vtc = this.currentEdge.connected[index];
+    this.lastVertice = vtc;
+    const dir = this.direction;
+    let edgeDir;
+    let nextEdge = undefined;
+    let criterion = -1;
+    for(let edg of vtc.connected){
+      if(edg.getState() !== IS_PASSABLE){ continue; }
+      if(edg.getIndex() === this.currentEdge.getIndex()){ continue; }
+      edgeDir = edg.getDirection();
+      if(edg.connected[0].getIndex() !== vtc.getIndex()){ edgeDir += PI; }
+      const newCriterion = cos(dir - edgeDir);
+      if(criterion < newCriterion){ criterion = newCriterion; nextEdge = edg; }
+    }
+    if(nextEdge === undefined){
+      this.progress = constrain(this.progress, 0, 1); return;
+    }
+    if(criterion > 0){
+      this.setEdge(nextEdge);
+      if(vtc.getIndex() === nextEdge.connected[0].getIndex()){ this.progress = 0; }else{ this.progress = 1; }
+      return;
+    }else{
+      this.progress = constrain(this.progress, 0, 1); return;
+    }
+  }
+  setPosition(){
+    this.position.set(this.from.x * (1 - this.progress) + this.to.x * this.progress,
+                      this.from.y * (1 - this.progress) + this.to.y * this.progress, 0.5);
+  }
+  getPosition(){
+    return this.position;
+  }
+  getDirection(){
+    return this.direction;
+  }
 }
 
 function setup(){
