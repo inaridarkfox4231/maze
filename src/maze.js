@@ -106,10 +106,51 @@
 // 無味乾燥だからだめ。なんかを真似するとか・・なんかないと。ただの迷路、じゃ、だめ。
 
 // それはおいといてとりあえず3次元にしてみるか（実験）
+// バーテックスカラーでフラグにしてどんなテクスチャを貼り付けるのか決める感じ（スタートとかゴールとか）
+// 壁とかいろいろ、壁はとりあえず灰色で床は水色で天井は・・天井は一枚にして（一枚とは限らないけど）
 
-let _FLOOR_IMAGE;
+// baseを用意してそこに描いて・・ではなくて、
+// WEBGLのモデルを用意して・・ってやる。
+// drawではなくデータをもとに、verticeの場合は床を描画、
+// edgeの場合は通れないところについて壁を
+
+// UV座標は1より大きいものも設定できるので
+// UもVも小数部分を0.01～0.99くらいにしてfloor取って種類を決められるようにする感じ。
+// たとえば1.01～1.99にしてスタートの画像を貼り付けるなど。やったことないけどできるでしょう。
+// データが完成したらdraw部分をまず破棄したうえでvertice情報に従って床の正方形を用意する
+// 普通の床は0でスタートが1でゴールが2.
+// 天井は3で壁が4.これはそのうちなんとかする・・種類をね・・今は全部同じでいいので。多分このスケールで2000行かないはず。
+// 最後にスタート位置に相当する場所にカメラをおいて完成、のはず。左右キーで横回転、スペースで前進、
+// 移動するのは中心
+// 斜めについては、、そうね。スペースキーで進む時に方向を補正するといいかも。十字路の場合は前方方向に対して
+// 一番近い方に曲がるようにする。とにかくレールからははずさないこと。
+
+// 天井は床の上に設置する。アウターウォールだけ別に用意する。contourをやめてアウターウォールのとこだけ線分の集合を用意するだけ。
+// 線分をもとにしてgridに応じて正方形を立ち上げる。
+// ていうかgridあるんだから整数でいいよね？？？？整数にしようね？？
+
+// ライティングに問題があるので天井だけなくす。うん。かわりになんか背景用意する。
+
+// まあまあいい感じ・・
+// とりあえずplayerはクラスにして、コンポーネントで。
+// 存在するedgeとprogress.0～1で。edgeの0番と1番の間のどこにいるかっていうのを毎フレーム計算で出す感じ。
+// スペースキーでprgが増えたり減ったりする。どっちであるかはedgeに0から1に向かう方向のdirectionを計算させておいて、
+// それと内積取って正なら増やす、負なら減らす。
+// 0か1になったらverticeに到達する。verticeに対し各々のedgeでIS_PASSABLEなものを調べ、別のverticeに向かう
+// 方向をすべて割り出したうえで、進行方向と内積取って一番デカいものを選んでそっちに行く。つまりedgeを乗り換える。
+// プログレスが0か1かはそのedgeでverticeが0か1かで決める。以上。
+// 超えたら。
+// 0より小さくなったり1より大きくなった時にこの処理を行う。OK.
+
+// 完成したらとりあえず↑キーで進めるようにしますね。
+
+/*
+let _FLOOR_IMAGE; // 水色
 let _START_IMAGE;
 let _GOAL_IMAGE;
+let _WALL_IMAGE; // 灰色
+*/
+let _IMAGE; // すべてのイメージ。とりあえず400x100にして左から順に床、スタート、ゴール、壁。
 
 // スタートとゴールと通常床（とワナ？？）
 const NORMAL = 0;
@@ -134,6 +175,151 @@ const FINISH = 3;  // 木の作成が完了しました。
 
 let master;
 
+let gl, _gl;
+let myFillShader;
+
+let vsFill =
+"precision mediump float;" +
+"precision mediump int;" +
+
+"uniform mat4 uViewMatrix;" +
+
+"uniform bool uUseLighting;" +
+
+"uniform int uAmbientLightCount;" +
+"uniform vec3 uAmbientColor[5];" +
+
+"uniform int uDirectionalLightCount;" +
+"uniform vec3 uLightingDirection[5];" +
+"uniform vec3 uDirectionalDiffuseColors[5];" +
+"uniform vec3 uDirectionalSpecularColors[5];" +
+
+"const float specularFactor = 2.0;" +
+"const float diffuseFactor = 0.73;" +
+
+"struct LightResult{" +
+"  float specular;" +
+"  float diffuse;" +
+"};" +
+
+"float _lambertDiffuse(vec3 lightDirection, vec3 surfaceNormal){" +
+// ここですね。法線ベクトルとライトベクトルで内積を取ってるのは。
+"  return max(0.0, dot(-lightDirection, surfaceNormal));" +
+"}" +
+
+"LightResult _light(vec3 viewDirection, vec3 normal, vec3 lightVector){" +
+"  vec3 lightDir = normalize(lightVector);" +
+//compute our diffuse & specular terms
+"  LightResult lr;" +
+"  lr.diffuse = _lambertDiffuse(lightDir, normal);" +
+"  return lr;" +
+"}" +
+
+"void totalLight(vec3 modelPosition, vec3 normal, out vec3 totalDiffuse, out vec3 totalSpecular){" +
+// Diffuseのデフォは1.0でSpecularのデフォは0.0です。まあ当然よね。
+"  totalSpecular = vec3(0.0);" +
+"  if(!uUseLighting){" +
+"    totalDiffuse = vec3(1.0);" +
+"    return;" +
+"  }" +
+// ライティング使ってるならDiffuseをいちから計算する
+"  totalDiffuse = vec3(0.0);" +
+"  vec3 viewDirection = normalize(-modelPosition);" +
+// これ以降の処理は定められたライトに対してのみ行なわれる感じね
+
+"  for(int j = 0; j < 5; j++){" +
+"    if(j < uDirectionalLightCount){" +
+"      vec3 lightVector = (uViewMatrix * vec4(uLightingDirection[j], 0.0)).xyz;" +
+"      vec3 lightColor = uDirectionalDiffuseColors[j];" +
+"      vec3 specularColor = uDirectionalSpecularColors[j];" +
+"      LightResult result = _light(viewDirection, normal, lightVector);" +
+"      totalDiffuse += result.diffuse * lightColor;" +
+"      totalSpecular += result.specular * lightColor * specularColor;" +
+"    }" +
+"  }" +
+"}" +
+
+// こっから下が追加部分
+// ライティング適用するならほんとはこういうの書かないといけなかったのよね
+// ディレクショナルオンリーにして余計な部分省いてもいいけど
+// アンビエント追加
+
+// include lighting.glgl
+
+"attribute vec3 aPosition;" +
+"attribute vec3 aNormal;" +
+"attribute vec2 aTexCoord;" +
+//"attribute vec4 aMaterialColor;" +
+
+"uniform mat4 uModelViewMatrix;" +
+"uniform mat4 uProjectionMatrix;" +
+"uniform mat3 uNormalMatrix;" +
+
+"varying highp vec2 vVertTexCoord;" +
+"varying vec3 vDiffuseColor;" +
+"varying vec3 vSpecularColor;" +
+"varying vec4 vVertexColor;" +
+
+"void main(void){" +
+  // 位置の変更はここでpのところをいじる
+"  vec3 p = aPosition;" +
+"  vec4 viewModelPosition = uModelViewMatrix * vec4(p, 1.0);" +
+"  gl_Position = uProjectionMatrix * viewModelPosition;" +
+
+"  vec3 vertexNormal = normalize(uNormalMatrix * aNormal);" +
+"  vVertTexCoord = aTexCoord;" +
+//"  vVertexColor = aMaterialColor;" +
+
+// totalLight
+// ここでvDiffuseColorとvSpecularColorに色情報をぶち込んでる
+// それらはここでは使われずvarying経由でlightTextureに送られて参照され色が決まる
+"  totalLight(viewModelPosition.xyz, vertexNormal, vDiffuseColor, vSpecularColor);" +
+"  for(int i = 0; i < 5; i++){" +
+"    if (i < uAmbientLightCount){" +
+"      vDiffuseColor += uAmbientColor[i];" +
+"    }" +
+"  }" +
+"}";
+
+// 若干変更しました
+// tintは使いたかったら0～1で今まで通り指定して掛けたかったら掛けてね
+// テクスチャで色変えたかったらvVertTexCoordに入ってるから
+// 自由に加工して使ってね
+// 以上
+
+let fsFill =
+"precision mediump float;" +
+
+"uniform vec4 uMaterialColor;" +
+"uniform vec4 uTint;" +
+
+// テクスチャ関連
+"uniform sampler2D uImg;" +
+
+"uniform bool isTexture;" +
+"uniform bool uEmissive;" +
+
+"varying highp vec2 vVertTexCoord;" +
+"varying vec3 vDiffuseColor;" +
+"varying vec3 vSpecularColor;" +
+//"varying vec4 vVertexColor;" +
+
+// getRGB,参上！
+"vec3 getRGB(float h, float s, float b){" +
+"    vec3 c = vec3(h, s, b);" +
+"    vec3 rgb = clamp(abs(mod(c.x * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);" +
+"    rgb = rgb * rgb * (3.0 - 2.0 * rgb);" +
+"    return c.z * mix(vec3(1.0), rgb, c.y);" +
+"}" +
+
+"void main(void) {" +
+"  vec4 col = texture2D(uImg, vVertTexCoord * vec2(0.25, 1.0));" + // ひとつにまとめてから・・これでいいはず。
+// "col = uMaterialColor;" +
+"  col.rgb = col.rgb * vDiffuseColor + vSpecularColor;" +
+"  gl_FragColor = col;" +
+"}";
+
+
 class Component{
   constructor(){
     this.state = undefined;
@@ -150,10 +336,9 @@ class Component{
 
 // 頂点
 class Vertice extends Component{
-	constructor(x = 0, y = 0, grid = 0){
+	constructor(x = 0, y = 0){
 		super();
 		this.position = createVector(x, y);
-		this.grid = grid;
 		this.type = undefined;
 		this.value = 0; // 作成時にこの値を更新に使うことでスタートを割り出しその後すべての値をリセットしたうえでゴールを探す感じですかね
 	}
@@ -169,6 +354,7 @@ class Vertice extends Component{
 	getValue(){
 		return this.value;
 	}
+  /*
 	draw(gr){
 		//gr.noStroke();
 		//if(this.state === UNREACHED){ gr.fill(158, 198, 255); }else{ gr.fill(0, 0, 225); }
@@ -179,13 +365,13 @@ class Vertice extends Component{
 		else if(this.type === GOAL){ img = _GOAL_IMAGE; }
 		gr.image(img, this.position.x - this.grid * 0.5, this.position.y - this.grid * 0.5, this.grid, this.grid, 0, 0, 100, 100);
 	}
+  */
 }
 
 // 辺
 class Edge extends Component{
 	constructor(grid = 0){
 		super();
-		this.grid = grid;
 		this.flag = undefined; // ゴールサーチ用
 	}
 	setFlag(_flag){
@@ -200,6 +386,7 @@ class Edge extends Component{
 	  if(this.connected[1].getIndex() === v.getIndex()){ return this.connected[0]; }
 		return undefined;
 	}
+  /*
 	draw(gr){
 		if(this.state !== IS_NOT_PASSABLE){ return; }
 		const {x:fx, y:fy} = this.connected[0].position;
@@ -210,34 +397,39 @@ class Edge extends Component{
 		const dy = (fy - ty) * 0.5;
 		gr.line(mx + dy, my - dx, mx - dy, my + dx);
 	}
+  */
 }
 
 // data = {vNum:12, eNum:17, connect:[[0, 8], [1, 8, 11], [2, 11, 14], ...], x:[...], y:[...]}
 // connectはindex番目の頂点に接する辺のindexの配列が入ったもの。
 // x, yには頂点の座標が入る予定だけど今はそこまで余裕ないです。
 // dataを元にまず頂点と辺が用意されて接続情報が登録されます。
-class Graph{
+class Maze{
 	constructor(data){
-		this.base = createGraphics(width, height);
+		//this.base = createGraphics(width, height);
+    this.grid = 0; // グリッド情報はグラフが持つ・・もうMazeの方がいいかな。
 		this.verticeArray = [];
 		this.edgeArray = [];
 		this.contour = []; // 輪郭線
 		this.prepareComponents(data); // 頂点の個数だけ入っててその分verticeを準備し端点として登録・・
 		this.start = undefined; // 最初の頂点を設定し、それよりvalueの大きな頂点で随時更新し続ける
 		this.goal = undefined; // valueの値を全部リセットしかつstartを起点としてサーチを進め、同じように更新し続ける感じ
+    this.playerPos = createVector();
+    this.direction = 0;
 	}
 	prepareComponents(data){
 		const {vNum:vn, eNum:en} = data;
-		this.contour = data.contour;
+		this.contour = data.contour; // {x0,y0,x1,y1}が入っててgridを掛け算して線分ができてそれをもとにアウターウォール
+    this.grid = data.grid;
 		this.verticeArray = [];
 		for(let i = 0; i < vn; i++){
-			let newV = new Vertice(data.x[i], data.y[i], data.grid);
+			let newV = new Vertice(data.x[i], data.y[i]);
 			newV.setIndex(i);
 			this.verticeArray.push(newV);
 		}
 		this.edgeArray = [];
 		for(let i = 0; i < en; i++){
-			let newE = new Edge(data.grid);
+			let newE = new Edge();
 			newE.setIndex(i);
 			this.edgeArray.push(newE);
 		}
@@ -301,8 +493,9 @@ class Graph{
 		this.start.setType(START);
 		this.searchGoal();
 		this.goal.setType(GOAL);
-		console.log(this.goal.getValue());
-		this.createMazeImage();
+		//console.log(this.goal.getValue());
+    this.playerPos.set(this.start.position.x, this.start.position.y, 0.5); // gridは掛けなくていい
+		this.createMazeModel();
 	}
 	searchGoal(){
 		// すべてのvalueを0にする→currentVerticeとgoalをstartにして出発→connectedな辺でUNCHECKEDなものだけ選んで進みvalueを1大きいものにしていく
@@ -332,7 +525,9 @@ class Graph{
 			this.edgeStack.push(connectedEdge);
 		}
 	}
-	createMazeImage(){
+	createMazeModel(){
+    // モデルを作る
+    /*
 		this.base.clear();
 		for(let v of this.verticeArray){ v.draw(this.base); }
 		this.base.stroke(0);
@@ -342,9 +537,116 @@ class Graph{
 		for(let i = 0; i < L; i++){
 			this.base.line(this.contour[i].x, this.contour[i].y, this.contour[(i + 1) % L].x, this.contour[(i + 1) % L].y);
 		}
+    */
+    const gId = "maze_0";
+    this.gId = gId;
+    if(!_gl.geometryInHash(gId)){
+      const _geom = new p5.Geometry();
+      // ベクトルの用意
+      let v = createVector();
+      // 床と内壁と外壁を用意する
+      // 内壁と外壁のテクスチャは全部同じで3（上がv=0で下がv=1って感じで）
+      // 床はスタートとゴールは1と2で他はすべて0でお願い。バーテックスカラーは今回不使用。
+      // 床はvertice情報に基づいてベクトル用意するだけ、外壁もcontour情報に基づいてベクトル用意するだけ。edgeがめんどくさい。
+      // これはIS_NOT_PASSABLEのものすべてに対して90°回転で線分を作ってその上に外壁と同じようにしてやる感じですね。
+      // まず床
+      let index = 0;
+      for(let vts of this.verticeArray){
+        // ±0.5で4つの点を用意する。xで-0.5に対しyで-0.5,+0.5でxで+0.5に対しyで-0.5,+0.5する、で、0,1,2の2,1,3する。
+        for(let dx = -0.5; dx < 1; dx += 1){
+          for(let dy = -0.5; dy < 1; dy += 1){
+            v.set(vts.position.x + dx, vts.position.y + dy, 0);
+            const _vtsType = vts.getType(); // 0,1,2.NORMAL,START,GOAL.
+            _geom.vertices.push(v.copy());
+            _geom.uvs.push(_vtsType + dx + 0.5, dy + 0.5);
+          }
+        }
+        _geom.faces.push(...[[index, index + 1, index + 2], [index + 2, index + 1, index + 3]]);
+        index += 4;
+      }
+
+      // 次に外壁。ここはとりあえず3で。
+      for(let seg of this.contour){
+        // seg.x0,seg.y0,seg.x1,seg.y1で下の線分。これを上に1だけ伸ばす。平行移動の軌跡。
+        v.set(seg.x0, seg.y0, 1);
+        _geom.vertices.push(v.copy()); _geom.uvs.push(3, 0);
+        v.set(seg.x0, seg.y0, 0);
+        _geom.vertices.push(v.copy()); _geom.uvs.push(3, 1);
+        v.set(seg.x1, seg.y1, 1);
+        _geom.vertices.push(v.copy()); _geom.uvs.push(4, 0);
+        v.set(seg.x1, seg.y1, 0);
+        _geom.vertices.push(v.copy()); _geom.uvs.push(4, 1);
+        _geom.faces.push(...[[index, index + 1, index + 2], [index + 2, index + 1, index + 3]]);
+        index += 4;
+      }
+      // 最後に内壁・・これはめんどくさいね。
+      for(let edg of this.edgeArray){
+        if(edg.getState() !== IS_NOT_PASSABLE){ continue; }
+        const {x:fx, y:fy} = edg.connected[0].position;
+    		const {x:tx, y:ty} = edg.connected[1].position;
+    		const mx = (fx + tx) * 0.5;
+    		const my = (fy + ty) * 0.5;
+    		const dx = (fx - tx) * 0.5;
+    		const dy = (fy - ty) * 0.5;
+    		const x0 = mx + dy;
+        const y0 = my - dx;
+        const x1 = mx - dy;
+        const y1 = my + dx;
+        v.set(x0, y0, 1);
+        _geom.vertices.push(v.copy()); _geom.uvs.push(3, 0);
+        v.set(x0, y0, 0);
+        _geom.vertices.push(v.copy()); _geom.uvs.push(3, 1);
+        v.set(x1, y1, 1);
+        _geom.vertices.push(v.copy()); _geom.uvs.push(4, 0);
+        v.set(x1, y1, 0);
+        _geom.vertices.push(v.copy()); _geom.uvs.push(4, 1);
+        _geom.faces.push(...[[index, index + 1, index + 2], [index + 2, index + 1, index + 3]]);
+        index += 4;
+      }
+
+      // 法線・辺計算
+      _geom._makeTriangleEdges()._edgesToVertices();
+      _geom.computeNormals();
+
+      // バッファ作成
+      _gl.createBuffers(gId, _geom);
+    }
 	}
-	draw(offSetX, offSetY){
-		image(this.base, offSetX, offSetY);
+  update(){
+    // ちょっとカメラ動かしてよ
+    if(keyIsDown(LEFT_ARROW)){ this.direction += 0.01 * TAU; }
+    if(keyIsDown(RIGHT_ARROW)){ this.direction -= 0.01 * TAU; }
+    // 正面行けないかな・・
+    // まずプレイヤーがどのセルにいるかの情報に基づいてIS_PASSABLEなedgeの方向があるので、いくつかあるので、
+    // それとdirectionで内積取って一番デカかったらそっちへ進むわけ。で、edgeの中におけるプログレスを記録しといて
+    // 0か1になるからそのときに・・ていうかああそうね、edgeの上にいるって思った方がいいかもだね。
+    // edgeのはしっこ(0か1)についたらそこのverticeを見て乗り換える。verticeから出ているedgeで方向がdirectionに近いものに乗り換え。
+    // プログレスも0か1で。んで、そっちで計算。
+  }
+	draw(){
+		//image(this.base, offSetX, offSetY);
+    // カメラ？？
+    // まずスタート位置にその・・
+    const g = this.grid;
+    const px = this.playerPos.x * g;
+    const py = this.playerPos.y * g;
+    const pz = this.playerPos.z * g;
+    const dx = cos(this.direction) * g;
+    const dy = sin(this.direction) * g;
+    const dz = 0;
+    //console.log(px,py,pz);
+    directionalLight(255, 255, 255, 1, 1, 1);
+    ambientLight(64);
+    camera(px - dx * 0.8, py - dy * 0.8, pz - dz * 0.8, px + dx * 0.4, py + dy * 0.4, pz + dz * 0.4, 0, 0, -1);
+    resetShader();
+    shader(myFillShader);
+    myFillShader.setUniform("uImg", _IMAGE);
+    _gl.drawBuffersScaled(this.gId, this.grid, this.grid, this.grid);
+    resetShader();
+    fill(128, 128, 255);
+    translate(px, py, pz * 0.5);
+    sphere(this.grid * 0.05);
+    //noLoop();
 	}
 }
 
@@ -353,19 +655,26 @@ class Graph{
 function createMazeData(w, h, grid){
 	let data = {};
 	data.grid = grid;
-	data.contour = [{x:0, y:0}, {x:w * grid, y:0}, {x:w * grid, y:h * grid}, {x:0, y:h * grid}];
+  data.contour = [];
+	//data.contour = [{x:0, y:0}, {x:w * grid, y:0}, {x:w * grid, y:h * grid}, {x:0, y:h * grid}];
+  for(let i = 0; i < w; i++){ data.contour.push({x0:i, y0:0, x1:i + 1, y1:0}); }
+  for(let j = 0; j < h; j++){ data.contour.push({x0:w, y0:j, x1:w, y1:j + 1}); }
+  for(let i = w; i > 0; i--){ data.contour.push({x0:i, y0:h, x1:i - 1, y1:h}); }
+  for(let j = h; j > 0; j--){ data.contour.push({x0:0, y0:j, x1:0, y1:j - 1}); }
 	data.vNum = w * h;
 	data.eNum = w * (h - 1) + (w - 1) * h;
 	data.x = [];
 	data.y = [];
 	for(let k = 0; k < h; k++){
 		for(let m = 0; m < w; m++){
-			data.x.push(grid * (0.5 + m));
+			//data.x.push(grid * (0.5 + m));
+      data.x.push(0.5 + m);
 		}
 	}
 	for(let k = 0; k < h; k++){
 		for(let m = 0; m < w; m++){
-			data.y.push(grid * (0.5 + k));
+			//data.y.push(grid * (0.5 + k));
+      data.y.push(0.5 + k);
 		}
 	}
 	data.connect = [];
@@ -383,64 +692,56 @@ function createMazeData(w, h, grid){
 }
 
 function setup(){
-	createCanvas(640, 480);
-	createFloor();
-	createStart();
-	createGoal();
-	const data = createMazeData(32, 24, 20);
-	master = new Graph(data);
+	_gl = createCanvas(640, 480, WEBGL);
+  gl = _gl.GL;
+  myFillShader = createShader(vsFill, fsFill);
+  noStroke();
+  prepareImage();
+
+	const data = createMazeData(8, 8, 100);
+	master = new Maze(data);
 	master.initialize();
 	master.createMaze();
+  gl.enable(gl.DEPTH_TEST);
 }
 
 function draw(){
-  background(220);
-	master.draw(0, 0);
+  background(0);
+  master.update();
+	master.draw();
 }
 
-function createFloor(){
-	_FLOOR_IMAGE = createGraphics(100, 100);
-	let gr = _FLOOR_IMAGE;
-	gr.colorMode(HSB,100);
-	gr.noStroke();
-	for(let i = 0; i < 50; i++){
+function prepareImage(){
+  _IMAGE = createGraphics(400, 100);
+  let gr = _IMAGE;
+  gr.colorMode(HSB, 100);
+  // まず床
+  gr.noStroke();
+  for(let i = 0; i < 50; i++){
 		gr.fill(55, 100 - 2 * i, 100);
 		gr.rect(i, i, 100 - 2 * i, 100 - 2 * i);
 	}
-}
-
-function createStart(){
-	_START_IMAGE = createGraphics(100, 100);
-	let gr = _START_IMAGE;
-	gr.colorMode(HSB,100);
-	gr.noStroke();
-	for(let i = 0; i < 50; i++){
+  gr.textSize(60);
+  gr.textAlign(CENTER, CENTER);
+  // 次にスタート
+  for(let i = 0; i < 50; i++){
 		gr.fill(5, 100 - 2 * i, 100);
-		gr.rect(i, i, 100 - 2 * i, 100 - 2 * i);
+		gr.rect(100 + i, i, 100 - 2 * i, 100 - 2 * i);
 	}
-	gr.fill(0);
-	gr.textSize(60);
-	gr.textAlign(CENTER, CENTER);
-	gr.text("S", 50, 50);
-}
-
-function createGoal(){
-	_GOAL_IMAGE = createGraphics(100, 100);
-	let gr = _GOAL_IMAGE;
-	gr.colorMode(HSB,100);
-	gr.noStroke();
-	for(let i = 0; i < 50; i++){
+  gr.fill(0);
+	gr.text("S", 150, 50);
+  // 次にゴール
+  for(let i = 0; i < 50; i++){
 		gr.fill(75, 100 - 2 * i, 100);
-		gr.rect(i, i, 100 - 2 * i, 100 - 2 * i);
+		gr.rect(200 + i, i, 100 - 2 * i, 100 - 2 * i);
 	}
-	gr.fill(0);
-	gr.textSize(60);
-	gr.textAlign(CENTER, CENTER);
-	gr.text("G", 50, 50);
+  gr.fill(0);
+	gr.text("G", 250, 50);
+  // 最後に壁
+  for(let i = 0; i < 50; i++){
+		gr.fill(i * 2);
+		gr.rect(300 + i, i, 100 - 2 * i, 100 - 2 * i);
+	}
 }
 
 // とりあえずクリックで再生成できるようになってるけど暫定処理ね
-function mouseClicked(){
-	master.initialize();
-	master.createMaze();
-}
