@@ -1,5 +1,18 @@
 // 2Dでやるぜ
 
+// TODO
+// 余計なコードの削除
+// トーラス構造でのテスト
+// 線の装飾や背景はどうするか
+// オフセットは機能しているのか（大きなサイズでもきちんと動くのか）
+// 各種アイコン、プレイヤーの表示
+// あと挙動が若干不自然なのをどう解消するのか
+// などなど
+
+// オフセット失敗してますね・・
+// ただおでかけしたいので後回しにしましょう。
+// とりあえず今は癒しの時間が欲しいです。
+
 let _IMAGE; // すべてのイメージ。とりあえず400x100にして左から順に床、スタート、ゴール、壁。
 
 // スタートとゴールと通常床（とワナ？？）
@@ -37,6 +50,8 @@ class Component{
 	getState(){ return this.state; }
 	setIndex(i){ this.index = i; }
 	getIndex(){ return this.index; }
+  getCmp(index){ return this.connected[index].cmp; }
+  getDir(index){ return this.connected[index].dir; }
 	regist(other, dir){ this.connected.push({cmp:other, dir:dir}); } // cmpはコンポーネントオブジェクト、dirは方向。
   // verticeの場合は辺が伸びる方向で、edgeの場合はその頂点から他の頂点に向かう方向。
   // フロアまたぎの場合でも（同じフロアの違う位置同士をつなぐ場合であっても）方向は互いに他の逆となるように
@@ -80,9 +95,10 @@ class Vertice extends Component{
 
 // 辺
 class Edge extends Component{
-	constructor(grid = 0){
+	constructor(_separate = false){
 		super();
 		this.flag = undefined; // ゴールサーチ用
+    this.separate = _separate; // 分かれてるかどうかっていう。
     //this.direction = 0; // 0から1へ向かう方向。
     // connectedに方向情報入れることにしたのでdirectionは廃止。
 	}
@@ -92,6 +108,8 @@ class Edge extends Component{
 	getFlag(){
 		return this.flag;
 	}
+  /*
+  // ここは、廃止かなぁ。
   setDirection(){
     // このやり方だとフロアまたぎ出来ないのでもう定義するときに決めちゃおう。引数で。
     // 0から1に向かう方向で一定。またぎでも。
@@ -102,10 +120,11 @@ class Edge extends Component{
   getDirection(){
     return this.direction;
   }
+  */
 	getOther(v){
 		// 与えられた引数の頂点とは反対側の頂点を返す。
-		if(this.connected[0].getIndex() === v.getIndex()){ return this.connected[1]; }
-	  if(this.connected[1].getIndex() === v.getIndex()){ return this.connected[0]; }
+		if(this.getCmp(0).getIndex() === v.getIndex()){ return this.getCmp(1); }
+	  if(this.getCmp(1).getIndex() === v.getIndex()){ return this.getCmp(0); }
 		return undefined;
 	}
   /*
@@ -130,17 +149,22 @@ class Edge extends Component{
 // WEBGLで背景として迷路のボードを
 // WEBGLのgrの配列のプロパティを持たせる！それと別に640x480のボードを！そこにオフセット考慮してはりつけ！！！！！！
 class Maze{
-	constructor(data){
+	constructor(){
 		//this.base = createGraphics(width, height);
-    this.grid = 0; // グリッド情報はグラフが持つ・・もうMazeの方がいいかな。
+    //this.grid = 0; // グリッド情報はグラフが持つ・・もうMazeの方がいいかな。
+    this.base = createGraphics(640, 480);
+    // フロアの縦横の大きさを保持しといてオフセットの計算で使う
+    this.w = 0;
+    this.h = 0;
 		this.verticeArray = [];
 		this.edgeArray = [];
+    this.floorArray = []; // フロアグラフィックの集合（webglでフロア枚数分）
 		//this.contour = []; // 輪郭線 // はいcontourは廃止です
-		this.prepareComponents(data); // 頂点の個数だけ入っててその分verticeを準備し端点として登録・・
+		//this.prepareComponents(data); // 頂点の個数だけ入っててその分verticeを準備し端点として登録・・
 		this.start = undefined; // 最初の頂点を設定し、それよりvalueの大きな頂点で随時更新し続ける
 		this.goal = undefined; // valueの値を全部リセットしかつstartを起点としてサーチを進め、同じように更新し続ける感じ
 
-    this._player = new Player(); // player動かすのもいろいろ考えないとね・・
+    this.player = new Player(); // player動かすのもいろいろ考えないとね・・ // プレイヤーは後回し
 	}
 	prepareComponents(data){
 		const {vNum:vn} = data;
@@ -170,10 +194,11 @@ class Maze{
     // で、2周目に・・？
     // いや、しなくても辺作ったらそのまま頂点にその辺を接続してしまえばいい。順番が大事なのね。
     let edgeIndex = 0;
+    this.edgeArray = [];
     for(let cn of data.connect){
       const v0 = this.verticeArray[cn.from];
       const v1 = this.verticeArray[cn.to];
-      let newE = new Edge();
+      let newE = new Edge(cn.separate); // いちいちseparateかどうかの判定はしない。connectを構成する際に付与しちゃう。
       newE.regist(v0, cn.dir);
       newE.regist(v1, cn.dir + Math.PI);
       v0.regist(newE, cn.dir);
@@ -181,6 +206,17 @@ class Maze{
       newE.setIndex(edgeIndex);
       edgeIndex++;
       this.edgeArray.push(newE);
+    }
+    // フロア枚数分だけ用意する感じ。描画の時にオフセットを考慮して描画する。プレイヤーも。
+    // キャンバス上のプレイヤーの位置とマウス位置で移動についての情報が決まる感じ。
+    this.floorArray = [];
+    this.w = data.w * GRID;
+    this.h = data.h * GRID;
+    for(let i = 0; i < data.floorNum; i++){
+      let gr = createGraphics(this.w, this.h);
+      gr.stroke(255);
+      gr.strokeWeight(GRID * 0.1);
+      this.floorArray.push(gr);
     }
 	}
 	initialize(seed = -1){
@@ -196,11 +232,11 @@ class Maze{
 	}
 	step(){
 		// 終了状況を返す。FINISHを返したら処理終了。
-		const undeterminedEdges = this.currentVertice.connected.filter((e) => { return e.getState() === UNDETERMINED; })
+		const undeterminedEdges = this.currentVertice.connected.filter((e) => { return e.cmp.getState() === UNDETERMINED; })
 		if(undeterminedEdges.length + this.edgeStack.length === 0){ return FINISH; }
 		if(undeterminedEdges.length > 0){
 			// 現在の頂点から未確定の辺が伸びている場合
-			let connectedEdge = random(undeterminedEdges);
+			let connectedEdge = random(undeterminedEdges).cmp;
 			let nextVertice = connectedEdge.getOther(this.currentVertice);
 			if(nextVertice.getState() === UNREACHED){
 				// 辺の先の頂点が未到達の場合
@@ -234,12 +270,28 @@ class Maze{
 		this.start.setType(START);
 		this.searchGoal();
 		this.goal.setType(GOAL);
+    this.createFloorGraphics();
+
+    // ここまでは一緒。
+    // ここから先はまずdata.floorNumの数だけグラフィックが与えられているのでstrokeShaderを使ってvalue値をもとに
+    // 各々のグラフィックに経路を描画する。ただし0の向こうに1がない場合は分けて半分ずつ。それを忘れずに。
+    // separateがtrueかfalseかっていうのを用意しましょう。で、基本はtrueだけどまたぐ場合にfalseにする・・・
+    // connectの中に放り込んでおいてそこから情報を取得、edgeのseparateにtrueかfalseがぶち込まれる感じ。
+    // separateがtrueの場合は半分ずつ、って感じ。
+    // フロアごとに[]を作り、その元は何からなるかというとGRID考慮したうえでの始点の座標、終点の座標。ただしz座標は
+    // フロアナンバーではなくvalueから計算したバーテックスの色のhue値。だからまたぐ場合は半分になるわけ（dir*GRIDだけ半分進む）。
+    // 中点だったり画面の橋だったり。ひし形図形ならその限りじゃないけど。
+    // zからhue値を割り出せればそれによりグラデーショナルラインが引けるのでよし！
+    // 迷路とは別の背景画像やスタート、ゴール、プレイヤーは2Dで描くなど自前で用意する。
+
+    // もろもろ終わったらプレイヤーのセッティング。
+
 		//console.log(this.goal.getValue());
     // startから出ているIS_PASSABLEな唯一の辺をthis._playerにセットして
     // かつプログレス(0か1)を与える。
-    this._player.setting(this.start);
+    this.player.setting(this.start); // プレイヤーは後回し。
     //this.playerPos.set(this.start.position.x, this.start.position.y, 0.5); // gridは掛けなくていい
-		this.createMazeModel();
+		//this.createMazeModel(); // 廃止。
 	}
 	searchGoal(){
 		// すべてのvalueを0にする→currentVerticeとgoalをstartにして出発→connectedな辺でUNCHECKEDなものだけ選んで進みvalueを1大きいものにしていく
@@ -251,7 +303,9 @@ class Maze{
 		this.currentVertice = this.start;
 		let debug = 99999;
 		while(debug--){
-		  const uncheckedEdges = this.currentVertice.connected.filter((e) => { return (e.getState() === IS_PASSABLE) && (e.getFlag() === UNCHECKED); });
+		  const uncheckedEdges = this.currentVertice.connected.filter((e) => {
+        return (e.cmp.getState() === IS_PASSABLE) && (e.cmp.getFlag() === UNCHECKED);
+      });
 		  if(uncheckedEdges.length + this.edgeStack.length === 0){ break; }
 			if(uncheckedEdges.length === 0){
 		    const backEdge = this.edgeStack.pop();
@@ -259,7 +313,7 @@ class Maze{
 		    this.currentVertice = backVertice;
 				continue;
 			}
-			let connectedEdge = random(uncheckedEdges);
+			let connectedEdge = random(uncheckedEdges).cmp;
 			let nextVertice = connectedEdge.getOther(this.currentVertice);
 			connectedEdge.setFlag(CHECKED);
 			const v = this.currentVertice.getValue();
@@ -269,130 +323,70 @@ class Maze{
 			this.edgeStack.push(connectedEdge);
 		}
 	}
-	createMazeModel(){
-    // モデルを作る
-    /*
-		this.base.clear();
-		for(let v of this.verticeArray){ v.draw(this.base); }
-		this.base.stroke(0);
-		this.base.strokeWeight(4);
-		for(let e of this.edgeArray){ e.draw(this.base); }
-		const L = this.contour.length;
-		for(let i = 0; i < L; i++){
-			this.base.line(this.contour[i].x, this.contour[i].y, this.contour[(i + 1) % L].x, this.contour[(i + 1) % L].y);
-		}
-    */
-    const gId = "maze_0";
-    this.gId = gId;
-    if(!_gl.geometryInHash(gId)){
-      const _geom = new p5.Geometry();
-      // ベクトルの用意
-      let v = createVector();
-      // 床と内壁と外壁を用意する
-      // 内壁と外壁のテクスチャは全部同じで3（上がv=0で下がv=1って感じで）
-      // 床はスタートとゴールは1と2で他はすべて0でお願い。バーテックスカラーは今回不使用。
-      // 床はvertice情報に基づいてベクトル用意するだけ、外壁もcontour情報に基づいてベクトル用意するだけ。edgeがめんどくさい。
-      // これはIS_NOT_PASSABLEのものすべてに対して90°回転で線分を作ってその上に外壁と同じようにしてやる感じですね。
-      // まず床
-      let index = 0;
-      for(let vtc of this.verticeArray){
-        // ±0.5で4つの点を用意する。xで-0.5に対しyで-0.5,+0.5でxで+0.5に対しyで-0.5,+0.5する、で、0,1,2の2,1,3する。
-        for(let dx = -0.5; dx < 1; dx += 1){
-          for(let dy = -0.5; dy < 1; dy += 1){
-            v.set(vtc.position.x + dx, vtc.position.y + dy, 0);
-            const _vtcType = vtc.getType(); // 0,1,2.NORMAL,START,GOAL.
-            _geom.vertices.push(v.copy());
-            _geom.uvs.push(_vtcType + dx + 0.5, dy + 0.5);
-          }
-        }
-        _geom.faces.push(...[[index, index + 1, index + 2], [index + 2, index + 1, index + 3]]);
-        index += 4;
+  createFloorGraphics(){
+    const L = GRID * 0.5;
+    for(let e of this.edgeArray){
+      if(e.getState() === IS_NOT_PASSABLE){ continue; }
+      const v0 = e.getCmp(0).position;
+      const v1 = e.getCmp(1).position;
+      const dir0 = e.getDir(0);
+      const dir1 = e.getDir(1);
+      const z0 = int(v0.z);
+      const z1 = int(v1.z);
+      if(!e.separate){
+        this.floorArray[z0].line(v0.x * GRID, v0.y * GRID, v1.x * GRID, v1.y * GRID);
+      }else{
+        this.floorArray[z0].line(v0.x * GRID, v0.y * GRID, v0.x * GRID + L * cos(dir0), v0.y * GRID + L * sin(dir0));
+        this.floorArray[z1].line(v1.x * GRID, v1.y * GRID, v1.x * GRID + L * cos(dir1), v1.y * GRID + L * sin(dir1));
       }
-
-      // 次に外壁。ここはとりあえず3で。
-      for(let seg of this.contour){
-        // seg.x0,seg.y0,seg.x1,seg.y1で下の線分。これを上に1だけ伸ばす。平行移動の軌跡。
-        v.set(seg.x0, seg.y0, 1);
-        _geom.vertices.push(v.copy()); _geom.uvs.push(3, 0);
-        v.set(seg.x0, seg.y0, 0);
-        _geom.vertices.push(v.copy()); _geom.uvs.push(3, 1);
-        v.set(seg.x1, seg.y1, 1);
-        _geom.vertices.push(v.copy()); _geom.uvs.push(4, 0);
-        v.set(seg.x1, seg.y1, 0);
-        _geom.vertices.push(v.copy()); _geom.uvs.push(4, 1);
-        _geom.faces.push(...[[index, index + 1, index + 2], [index + 2, index + 1, index + 3]]);
-        index += 4;
-      }
-      // 最後に内壁・・これはめんどくさいね。
-      for(let edg of this.edgeArray){
-        if(edg.getState() !== IS_NOT_PASSABLE){ continue; }
-        const {x:fx, y:fy} = edg.connected[0].position;
-    		const {x:tx, y:ty} = edg.connected[1].position;
-    		const mx = (fx + tx) * 0.5;
-    		const my = (fy + ty) * 0.5;
-    		const dx = (fx - tx) * 0.5;
-    		const dy = (fy - ty) * 0.5;
-    		const x0 = mx + dy;
-        const y0 = my - dx;
-        const x1 = mx - dy;
-        const y1 = my + dx;
-        v.set(x0, y0, 1);
-        _geom.vertices.push(v.copy()); _geom.uvs.push(3, 0);
-        v.set(x0, y0, 0);
-        _geom.vertices.push(v.copy()); _geom.uvs.push(3, 1);
-        v.set(x1, y1, 1);
-        _geom.vertices.push(v.copy()); _geom.uvs.push(4, 0);
-        v.set(x1, y1, 0);
-        _geom.vertices.push(v.copy()); _geom.uvs.push(4, 1);
-        _geom.faces.push(...[[index, index + 1, index + 2], [index + 2, index + 1, index + 3]]);
-        index += 4;
-      }
-
-      // 法線・辺計算
-      _geom._makeTriangleEdges()._edgesToVertices();
-      _geom.computeNormals();
-
-      // バッファ作成
-      _gl.createBuffers(gId, _geom);
     }
-	}
+  }
   update(){
     // ちょっとカメラ動かしてよ
     //if(keyIsDown(LEFT_ARROW)){ this.direction += 0.01 * TAU; }
     //if(keyIsDown(RIGHT_ARROW)){ this.direction -= 0.01 * TAU; }
-    this._player.update();
+    // this._player.update(); // プレイヤーは後回し
     // 正面行けないかな・・
     // まずプレイヤーがどのセルにいるかの情報に基づいてIS_PASSABLEなedgeの方向があるので、いくつかあるので、
     // それとdirectionで内積取って一番デカかったらそっちへ進むわけ。で、edgeの中におけるプログレスを記録しといて
     // 0か1になるからそのときに・・ていうかああそうね、edgeの上にいるって思った方がいいかもだね。
     // edgeのはしっこ(0か1)についたらそこのverticeを見て乗り換える。verticeから出ているedgeで方向がdirectionに近いものに乗り換え。
     // プログレスも0か1で。んで、そっちで計算。
+    const pos = this.getDrawPos(this.player.position);
+    this.player.setDirection(pos);
+    this.player.update();
+  }
+  getOffSet(p){
+    // pをプレイヤーのグローバルな位置としたときの画像の貼り付けの左上座標。
+    return {x:constrain(p.x * GRID - 320, 0, this.w - 640), y:constrain(p.y * GRID - 240, 0, this.h - 480)};
+  }
+  getDrawPos(p){
+    // 画面に表示される位置の計算。
+    return {x:p.x * GRID - constrain(p.x * GRID - 320, 0, this.w - 640), y:p.y * GRID - constrain(p.y * GRID - 240, 0, this.h - 480)};
   }
 	draw(){
-		//image(this.base, offSetX, offSetY);
-    // カメラ？？
-    // まずスタート位置にその・・
-    const g = this.grid;
-    const pos = this._player.getPosition();
-    const dir = this._player.getDirection();
-    const px = pos.x * g;
-    const py = pos.y * g;
-    const pz = pos.z * g;
-    const dx = cos(dir) * g;
-    const dy = sin(dir) * g;
-    const dz = 0;
-    //console.log(px,py,pz);
-    directionalLight(255, 255, 255, 1, 1, 1);
-    ambientLight(64);
-    camera(px - dx * 0.8, py - dy * 0.8, pz - dz * 0.8, px + dx * 0.4, py + dy * 0.4, pz + dz * 0.4, 0, 0, -1);
-    resetShader();
-    shader(myFillShader);
-    myFillShader.setUniform("uImg", _IMAGE);
-    _gl.drawBuffersScaled(this.gId, this.grid, this.grid, this.grid);
-    resetShader();
-    fill(128, 128, 255);
-    translate(px, py, pz * 0.5);
-    sphere(this.grid * 0.05);
+    background(220);
+    const currentFloorIndex = this.player.position.z;
+    this.base.background(0);
+    // ゆくゆくはプレイヤーの存在するフロアに応じたグラフィックが呼び出されて
+    // プレイヤーの位置に応じてオフセット処理されたうえで描画される感じ
+    this.base.image(this.floorArray[currentFloorIndex], 0, 0); // とりあえずこれだけ
+    this.base.noStroke();
+    if(this.start.position.z === currentFloorIndex){
+      this.base.fill(255, 128, 0);
+      const s = this.getDrawPos(this.start.position);
+      this.base.circle(s.x, s.y, GRID * 0.8);
+    }
+    if(this.goal.position.z === currentFloorIndex){
+      this.base.fill(0, 128, 255);
+      const g = this.getDrawPos(this.goal.position);
+      this.base.circle(g.x, g.y, GRID * 0.8);
+    }
+    // このあとスタート、ゴール、プレイヤーの表示。
+    this.base.fill(128, 255, 128);
+    const p = this.getDrawPos(this.player.position);
+    this.base.circle(p.x, p.y, GRID * 0.4);
+    image(this.base, 0, 0);
     //noLoop();
 	}
 }
@@ -432,6 +426,9 @@ function createRectMazeData(w, h, n){
   let data = {};
   data.vNum = 0;
   // 冷静に考えたらeNum要らないや。廃止。
+  data.w = w;
+  data.h = h;
+  data.floorNum = n; // フロア数
   data.x = [];
   data.y = [];
   data.z = [];
@@ -445,7 +442,7 @@ function createRectMazeData(w, h, n){
   // 辺のインデックスのやり方だと複雑化に対応できないので、重複を許さない頂点のペア全体でやる。インデックスの。
   // {from:始点のインデックス、to:終点のインデックス、dir:始点から終点に向かう方向}で。ただしその方向に頂点が
   // あるとは限らない。
-  for(let i = 0; i < n; k++){
+  for(let i = 0; i < n; i++){
     for(let k = 0; k < h; k++){
       for(let m = 0; m < w; m++){
         data.x.push(0.5 + m);
@@ -454,14 +451,16 @@ function createRectMazeData(w, h, n){
         data.vNum++;
         const index = i * w * h + w * k + m;
         if(m < w - 1){
-          data.connect.push({from:index, to:index + 1, dir:0});
+          // separateはすべてfalse. フロアまたぎや同じ迷路でのループはtrueになるがそれは個別に指定する。
+          data.connect.push({from:index, to:index + 1, dir:0, separate:false});
         }
         if(k < h - 1){
-          data.connect.push({from:index, to:index + w, dir:Math.PI * 0.5});
+          data.connect.push({from:index, to:index + w, dir:Math.PI * 0.5, separate:false});
         }
       }
     }
   }
+  return data;
 }
 /*
 function createSingleRectMazeData(w, h){
@@ -531,6 +530,8 @@ function createMazeData_0(){
 }
 // たとえばトーラスにするならこの後でdataをいじってeNum増やしたり接続増やしたりする。
 
+// directionの設定
+// プレイヤーの画面内での位置はあっちで計算するのでそれをインプットしてこっちで計算する（マウス使って）
 class Player{
   constructor(){
     this.currentEdge = undefined;
@@ -538,36 +539,43 @@ class Player{
     this.from = createVector(0, 0);
     this.to = createVector(0, 0);
     this.currentEdgeDirection = 0;
-    this.position = createVector();
+    this.position = createVector(0, 0, 0); // 3番目の引数はフロア番号
     this.direction = 0;
     this.lastVertice = undefined; // 最後に訪れた頂点。edgeの乗り換えの際に更新される感じ。
-    this.rotationSpeed = 0.01 * TAU;
-    this.speed = 0.03;
+    this.speed = 0.125; // 8フレームで1GRID移動する感じ。
   }
   setting(start){
-    for(let edg of start.connected){
+    for(let index = 0; index < start.connected.length; index++){
+      const edg = start.getCmp(index);
       if(edg.getState() === IS_PASSABLE){
         this.setEdge(edg);
-        if(start.getIndex() === edg.connected[0].getIndex()){ this.progress = 0; }else{ this.progress = 1; }
+        if(start.getIndex() === edg.getCmp(0).getIndex()){ this.progress = 0; }else{ this.progress = 1; }
         break;
       }
     }
   }
   setEdge(edg){
     this.currentEdge = edg;
-    this.from = edg.connected[0].position;
-    this.to = edg.connected[1].position;
-    this.currentEdgeDirection = edg.getDirection();
+    this.from = edg.getCmp(0).position;
+    this.to = edg.getCmp(1).position;
+    this.currentEdgeDirection = edg.getDir(0); // 0から1に向かう方向
   }
   update(){
+    /*
     if(keyIsDown(LEFT_ARROW)){ this.direction += this.rotationSpeed; }
     else if(keyIsDown(RIGHT_ARROW)){ this.direction -= this.rotationSpeed; }
     else if(keyIsDown(UP_ARROW)){ this.advance(); }
+    */
+    this.advance();
     this.setPosition();
   }
-  setLastVertice(vtc){
+  setDirection(pos){
+    // posは画面内でのプレイヤーの位置(maze側から送る)
+    this.direction = atan2(mouseY - pos.y, mouseX - pos.x);
+  }
+  setLastVertice(v){
     // たとえば、このときにイベントフラグをONにして・・・
-    this.lastVertice = vtc;
+    this.lastVertice = v;
   }
   getLastVertice(vtc){
     // 取得の際にフラグが立っていたら何かしらあっちで処理してフラグを折る、みたいなことが考えられる。
@@ -605,34 +613,45 @@ class Player{
     // あとはsetEdgeが全部やってくれる
     // 要するにMAX取ってMAXが負ならやることない、正なら・・って感じ。
     const index = (this.progress < 0 ? 0 : 1);
-    const vtc = this.currentEdge.connected[index];
-    this.lastVertice = vtc;
+    const vtc = this.currentEdge.getCmp(index);
+    this.setLastVertice(vtc);
     const dir = this.direction;
     let edgeDir;
     let nextEdge = undefined;
     let criterion = -1;
-    for(let edg of vtc.connected){
-      if(edg.getState() !== IS_PASSABLE){ continue; }
-      if(edg.getIndex() === this.currentEdge.getIndex()){ continue; }
-      edgeDir = edg.getDirection();
-      if(edg.connected[0].getIndex() !== vtc.getIndex()){ edgeDir += PI; }
+    for(let index = 0; index < vtc.connected.length; index++){
+      const edg = vtc.getCmp(index);
+      if(edg.getState() !== IS_PASSABLE){ continue; } // 通れない辺はスルー
+      if(edg.getIndex() === this.currentEdge.getIndex()){ continue; } // 同じ辺の場合はスルー
+      edgeDir = edg.getDir(0);
+      if(edg.getCmp(0).getIndex() !== vtc.getIndex()){ edgeDir += PI; } // 反対側の頂点の場合は方向を逆にする
       const newCriterion = cos(dir - edgeDir);
       if(criterion < newCriterion){ criterion = newCriterion; nextEdge = edg; }
     }
     if(nextEdge === undefined){
+      // 次の行先がない場合は据え置き
       this.progress = constrain(this.progress, 0, 1); return;
     }
     if(criterion > 0){
+      // 次の行先があってその方向に進める場合
       this.setEdge(nextEdge);
-      if(vtc.getIndex() === nextEdge.connected[0].getIndex()){ this.progress = 0; }else{ this.progress = 1; }
+      if(vtc.getIndex() === nextEdge.getCmp(0).getIndex()){ this.progress = 0; }else{ this.progress = 1; }
       return;
     }else{
+      // 次の行先があっても方向が逆の場合
       this.progress = constrain(this.progress, 0, 1); return;
     }
   }
   setPosition(){
+    // separate辺の場合はz座標についてあれこれする
+    let zCoord;
+    if(this.progress < 0.5){
+      zCoord = this.from.z;
+    }else{
+      zCoord = this.to.z;
+    }
     this.position.set(this.from.x * (1 - this.progress) + this.to.x * this.progress,
-                      this.from.y * (1 - this.progress) + this.to.y * this.progress, 0.5);
+                      this.from.y * (1 - this.progress) + this.to.y * this.progress, zCoord);
   }
   getPosition(){
     return this.position;
@@ -647,13 +666,16 @@ function setup(){
   prepareImage();
 
 	const data = createMazeData_0();
-	master = new Maze(data);
+	master = new Maze();
+  // 以下の処理はステージ開始時に行われるようにしていきたい・・
+  // 同じ形式ならinitializeでいいけど迷路のスタイルを変える場合はふたたびデータ作ってprepareComponentsで
+  // 整える必要がある。Mazeは一つだけ用意して使いまわす。
+  master.prepareComponents(data);
 	master.initialize();
 	master.createMaze();
 }
 
 function draw(){
-  background(0);
   master.update();
 	master.draw();
 }
