@@ -1,5 +1,3 @@
-// 2Dでやるぜ
-
 // TODO
 // 余計なコードの削除
 // トーラス構造でのテスト
@@ -9,11 +7,11 @@
 // あと挙動が若干不自然なのをどう解消するのか
 // などなど
 
-// オフセット失敗してますね・・
-// ただおでかけしたいので後回しにしましょう。
-// とりあえず今は癒しの時間が欲しいです。
-
 let _IMAGE; // すべてのイメージ。とりあえず400x100にして左から順に床、スタート、ゴール、壁。
+
+// 表示のオフセット
+const OFFSET_X = 80;
+const OFFSET_Y = 80;
 
 // スタートとゴールと通常床（とワナ？？）
 const NORMAL = 0;
@@ -79,18 +77,7 @@ class Vertice extends Component{
 	getValue(){
 		return this.value;
 	}
-  /*
-	draw(gr){
-		//gr.noStroke();
-		//if(this.state === UNREACHED){ gr.fill(158, 198, 255); }else{ gr.fill(0, 0, 225); }
-		//gr.circle(this.position.x, this.position.y, 8);
-		let img;
-		if(this.type === NORMAL){ img = _FLOOR_IMAGE; }
-		else if(this.type === START){ img = _START_IMAGE; }
-		else if(this.type === GOAL){ img = _GOAL_IMAGE; }
-		gr.image(img, this.position.x - this.grid * 0.5, this.position.y - this.grid * 0.5, this.grid, this.grid, 0, 0, 100, 100);
-	}
-  */
+  // 特定の頂点のdrawに使う・・？
 }
 
 // 辺
@@ -99,7 +86,6 @@ class Edge extends Component{
 		super();
 		this.flag = undefined; // ゴールサーチ用
     this.separate = _separate; // 分かれてるかどうかっていう。
-    //this.direction = 0; // 0から1へ向かう方向。
     // connectedに方向情報入れることにしたのでdirectionは廃止。
 	}
 	setFlag(_flag){
@@ -108,50 +94,20 @@ class Edge extends Component{
 	getFlag(){
 		return this.flag;
 	}
-  /*
-  // ここは、廃止かなぁ。
-  setDirection(){
-    // このやり方だとフロアまたぎ出来ないのでもう定義するときに決めちゃおう。引数で。
-    // 0から1に向かう方向で一定。またぎでも。
-    const dx = this.connected[1].position.x - this.connected[0].position.x;
-    const dy = this.connected[1].position.y - this.connected[0].position.y;
-    this.direction = atan2(dy, dx);
-  }
-  getDirection(){
-    return this.direction;
-  }
-  */
 	getOther(v){
 		// 与えられた引数の頂点とは反対側の頂点を返す。
 		if(this.getCmp(0).getIndex() === v.getIndex()){ return this.getCmp(1); }
 	  if(this.getCmp(1).getIndex() === v.getIndex()){ return this.getCmp(0); }
 		return undefined;
 	}
-  /*
-	draw(gr){
-		if(this.state !== IS_NOT_PASSABLE){ return; }
-		const {x:fx, y:fy} = this.connected[0].position;
-		const {x:tx, y:ty} = this.connected[1].position;
-		const mx = (fx + tx) * 0.5;
-		const my = (fy + ty) * 0.5;
-		const dx = (fx - tx) * 0.5;
-		const dy = (fy - ty) * 0.5;
-		gr.line(mx + dy, my - dx, mx - dy, my + dx);
-	}
-  */
 }
 
 // data = {vNum:12, eNum:17, connect:[[0, 8], [1, 8, 11], [2, 11, 14], ...], x:[...], y:[...]}
 // connectはindex番目の頂点に接する辺のindexの配列が入ったもの。
 // x, yには頂点の座標が入る予定だけど今はそこまで余裕ないです。
 // dataを元にまず頂点と辺が用意されて接続情報が登録されます。
-
-// WEBGLで背景として迷路のボードを
-// WEBGLのgrの配列のプロパティを持たせる！それと別に640x480のボードを！そこにオフセット考慮してはりつけ！！！！！！
 class Maze{
 	constructor(){
-		//this.base = createGraphics(width, height);
-    //this.grid = 0; // グリッド情報はグラフが持つ・・もうMazeの方がいいかな。
     this.base = createGraphics(640, 480);
     // フロアの縦横の大きさを保持しといてオフセットの計算で使う
     this.w = 0;
@@ -159,8 +115,6 @@ class Maze{
 		this.verticeArray = [];
 		this.edgeArray = [];
     this.floorArray = []; // フロアグラフィックの集合（webglでフロア枚数分）
-		//this.contour = []; // 輪郭線 // はいcontourは廃止です
-		//this.prepareComponents(data); // 頂点の個数だけ入っててその分verticeを準備し端点として登録・・
 		this.start = undefined; // 最初の頂点を設定し、それよりvalueの大きな頂点で随時更新し続ける
 		this.goal = undefined; // valueの値を全部リセットしかつstartを起点としてサーチを進め、同じように更新し続ける感じ
 
@@ -168,9 +122,6 @@ class Maze{
 	}
 	prepareComponents(data){
 		const {vNum:vn} = data;
-		//this.contour = data.contour; // {x0,y0,x1,y1}が入っててgridを掛け算して線分ができてそれをもとにアウターウォール
-    // contourは廃止。
-    //this.grid = data.grid;
 		this.verticeArray = [];
 		for(let i = 0; i < vn; i++){
 			let newV = new Vertice(data.x[i], data.y[i], data.z[i]); // zはフロア番号
@@ -179,14 +130,7 @@ class Maze{
 		}
     // connectの各元はedgeと一対一で対応しているので、connectを走査してedgeをその都度
     // 作っていけばいい。だからここで作る必要はない。
-    /*
-		this.edgeArray = [];
-		for(let i = 0; i < en; i++){
-			let newE = new Edge();
-			newE.setIndex(i);
-			this.edgeArray.push(newE);
-		}
-    */
+
     // connectの中身から2つの頂点を出してfromが0でtoが1で順繰りに。
     // fromでまず頂点のconnectedに辺を追加する・・どこの？？
     // 手順としては先に辺のconnectedに頂点を追加しますね。fromが0でtoが1でdirはfromはdirでtoはdir+PIだよね。
@@ -272,26 +216,7 @@ class Maze{
 		this.goal.setType(GOAL);
     this.createFloorGraphics();
 
-    // ここまでは一緒。
-    // ここから先はまずdata.floorNumの数だけグラフィックが与えられているのでstrokeShaderを使ってvalue値をもとに
-    // 各々のグラフィックに経路を描画する。ただし0の向こうに1がない場合は分けて半分ずつ。それを忘れずに。
-    // separateがtrueかfalseかっていうのを用意しましょう。で、基本はtrueだけどまたぐ場合にfalseにする・・・
-    // connectの中に放り込んでおいてそこから情報を取得、edgeのseparateにtrueかfalseがぶち込まれる感じ。
-    // separateがtrueの場合は半分ずつ、って感じ。
-    // フロアごとに[]を作り、その元は何からなるかというとGRID考慮したうえでの始点の座標、終点の座標。ただしz座標は
-    // フロアナンバーではなくvalueから計算したバーテックスの色のhue値。だからまたぐ場合は半分になるわけ（dir*GRIDだけ半分進む）。
-    // 中点だったり画面の橋だったり。ひし形図形ならその限りじゃないけど。
-    // zからhue値を割り出せればそれによりグラデーショナルラインが引けるのでよし！
-    // 迷路とは別の背景画像やスタート、ゴール、プレイヤーは2Dで描くなど自前で用意する。
-
-    // もろもろ終わったらプレイヤーのセッティング。
-
-		//console.log(this.goal.getValue());
-    // startから出ているIS_PASSABLEな唯一の辺をthis._playerにセットして
-    // かつプログレス(0か1)を与える。
     this.player.setting(this.start); // プレイヤーは後回し。
-    //this.playerPos.set(this.start.position.x, this.start.position.y, 0.5); // gridは掛けなくていい
-		//this.createMazeModel(); // 廃止。
 	}
 	searchGoal(){
 		// すべてのvalueを0にする→currentVerticeとgoalをstartにして出発→connectedな辺でUNCHECKEDなものだけ選んで進みvalueを1大きいものにしていく
@@ -342,16 +267,6 @@ class Maze{
     }
   }
   update(){
-    // ちょっとカメラ動かしてよ
-    //if(keyIsDown(LEFT_ARROW)){ this.direction += 0.01 * TAU; }
-    //if(keyIsDown(RIGHT_ARROW)){ this.direction -= 0.01 * TAU; }
-    // this._player.update(); // プレイヤーは後回し
-    // 正面行けないかな・・
-    // まずプレイヤーがどのセルにいるかの情報に基づいてIS_PASSABLEなedgeの方向があるので、いくつかあるので、
-    // それとdirectionで内積取って一番デカかったらそっちへ進むわけ。で、edgeの中におけるプログレスを記録しといて
-    // 0か1になるからそのときに・・ていうかああそうね、edgeの上にいるって思った方がいいかもだね。
-    // edgeのはしっこ(0か1)についたらそこのverticeを見て乗り換える。verticeから出ているedgeで方向がdirectionに近いものに乗り換え。
-    // プログレスも0か1で。んで、そっちで計算。
     const pos = this.getDrawPos(this.player.position);
     this.player.setDirection(pos);
     this.player.update();
@@ -360,9 +275,10 @@ class Maze{
     // pをプレイヤーのグローバルな位置としたときの画像の貼り付けの左上座標。
     return {x:constrain(p.x * GRID - 320, 0, this.w - 640), y:constrain(p.y * GRID - 240, 0, this.h - 480)};
   }
-  getDrawPos(p){
+  getDrawPos(p, offSet){
     // 画面に表示される位置の計算。
-    return {x:p.x * GRID - constrain(p.x * GRID - 320, 0, this.w - 640), y:p.y * GRID - constrain(p.y * GRID - 240, 0, this.h - 480)};
+    if(!offSet){ offSet = this.getOffSet(p); } // offSetがundefinedの場合はp自身から計算されたoffSet値を使う
+    return {x:p.x * GRID - offSet.x, y:p.y * GRID - offSet.y};
   }
 	draw(){
     background(220);
@@ -370,52 +286,28 @@ class Maze{
     this.base.background(0);
     // ゆくゆくはプレイヤーの存在するフロアに応じたグラフィックが呼び出されて
     // プレイヤーの位置に応じてオフセット処理されたうえで描画される感じ
-    this.base.image(this.floorArray[currentFloorIndex], 0, 0); // とりあえずこれだけ
+    const offSet = this.getOffSet(this.player.position);
+    // image関数の使い方に注意してね
+    this.base.image(this.floorArray[currentFloorIndex], 0, 0, this.w, this.h, offSet.x, offSet.y, this.w, this.h);
     this.base.noStroke();
     if(this.start.position.z === currentFloorIndex){
       this.base.fill(255, 128, 0);
-      const s = this.getDrawPos(this.start.position);
+      const s = this.getDrawPos(this.start.position, offSet);
       this.base.circle(s.x, s.y, GRID * 0.8);
     }
     if(this.goal.position.z === currentFloorIndex){
       this.base.fill(0, 128, 255);
-      const g = this.getDrawPos(this.goal.position);
+      const g = this.getDrawPos(this.goal.position, offSet);
       this.base.circle(g.x, g.y, GRID * 0.8);
     }
     // このあとスタート、ゴール、プレイヤーの表示。
     this.base.fill(128, 255, 128);
-    const p = this.getDrawPos(this.player.position);
+    const p = this.getDrawPos(this.player.position, offSet);
     this.base.circle(p.x, p.y, GRID * 0.4);
-    image(this.base, 0, 0);
+    image(this.base, OFFSET_X, OFFSET_Y);
     //noLoop();
 	}
 }
-
-// 迷路とは限らない以上、迷路用のデータ作成部分は分離して記述すべき。
-// wは格子の横のサイズ、hは格子の縦のサイズ。
-// んー
-// 長方形と、それを組み合わせたものしか使わないので、、、
-// 自由なつなぎ方をさせるにはどうするか？？？
-// データを増やす
-// 0,1,2,3のいずれの方向に接続点が伸びているかの情報を与えて辺が点からその情報を取得してそれに基づいて
-// グラフに描画する、たとえば階層0から階層2に伸びる場合は階層0の方を見て1に伸びてたら下に半分伸ばして2の方がこの場合
-// 3に伸びてるから上に半分伸ばす、プレイヤーがその上を移動する際にも階層0の側から行く場合はプログレス0.5までその方向に移動する感じ
-// 実際に点が見えてなくてもこれでいける
-// これ使えば折れ曲がった経路も可能？マウス操作がめんどいので却下。
-
-// あーーーー、そうだ、階層を引数に加えて、複数用意して統合、とかできたらいいのに！じかんがない！
-// 通常の長方形迷路。輪郭は周囲全体。
-
-// 全部統一
-// その、まずcontourは廃止。で、線分ごとにそれぞれのフロアの情報配列に放り込んで・・
-// あー、頂点と方向と長さの組をね。2つの頂点を参照して同じフロアなら0から1まで普通に。
-// 違うフロアの場合は・・まあ辺が0から1に向かうdirectionの情報を持ってるので、それに従って半分までって感じ。
-// 書き方を統一したいので{頂点、方向、長さ}？？あ、まあ、そうね・・{x,y,z,w}で(x,y)と(z,w)でやればいいか？
-// んーと。valueからhue値計算してそれをz座標として渡したいのでそれも追加で。{x0,y0,z0,x1,y1,z1}ですね。
-// そうしてフロアの枚数だけオブジェクトの配列ができたらそれをもとにそれぞれのフロアに相当するWEBGLのキャンバスに線分の
-// データを放り込んでそんな感じで。うん。
-// これを背景として使う。黒一色のバックグラウンドに貼り付ける。なんかアニメーションあってもいいかも。三角四角がくるくる～とか。
-// もういっそ毎フレーム描画でいいのでは？？とか思ったりする。
 
 // 一般的な長方形のメイズデータ。
 // 同じ長方形をn枚用意する感じ
@@ -462,73 +354,79 @@ function createRectMazeData(w, h, n){
   }
   return data;
 }
-/*
-function createSingleRectMazeData(w, h){
-	let data = {};
-	data.grid = GRID;
-  data.contours = [];
-  let contour = [];
-	//data.contour = [{x:0, y:0}, {x:w * grid, y:0}, {x:w * grid, y:h * grid}, {x:0, y:h * grid}];
-  for(let i = 0; i < w; i++){ contour.push({x0:i, y0:0, z0:0, x1:i + 1, y1:0, z1:0}); }
-  for(let j = 0; j < h; j++){ contour.push({x0:w, y0:j, z0:0, x1:w, y1:j + 1, z1:0}); }
-  for(let i = w; i > 0; i--){ contour.push({x0:i, y0:h, z0:0, x1:i - 1, y1:h, z1:0}); }
-  for(let j = h; j > 0; j--){ contour.push({x0:0, y0:j, z0:0, x1:0, y1:j - 1, z1:0}); }
-  data.contours.push(contour);
-	data.vNum = w * h;
-	data.eNum = w * (h - 1) + (w - 1) * h;
-	data.x = [];
-	data.y = [];
-  data.z = []; // 0とか1とか。つなぐときに使う。
-	for(let k = 0; k < h; k++){
-		for(let m = 0; m < w; m++){
-			//data.x.push(grid * (0.5 + m));
-      data.x.push(0.5 + m);
-      data.z.push(0);
-		}
-	}
-	for(let k = 0; k < h; k++){
-		for(let m = 0; m < w; m++){
-			//data.y.push(grid * (0.5 + k));
-      data.y.push(0.5 + k);
-		}
-	}
-	data.connect = [];
-  // 各頂点についてどこと接続してるかみたいなのを入力
-  // 別階層の場合は追加でコードを・・すればいいはず
-	for(let index = 0; index < w * h; index++){
-		const x = index % w;
-		const y = Math.floor(index / w);
-		let connectedData = [];
-    // idは接続されてる点のidでdirはそれがある方向ですね。
-		if(y > 0){ connectedData.push({id:x + (y - 1) * w, dir:3}); }
-		if(y < h - 1){ connectedData.push({id:x + y * w, dir:1}); }
-		if(x > 0){ connectedData.push({id:w * (h - 1) + h * (x - 1) + y, dir:2}); }
-		if(x < w - 1){ connectedData.push({id:w * (h - 1) + h * x + y, dir:0}); }
-		data.connect.push(connectedData);
-	}
-	return data;
-  // 同じ階層で上下をつなぐとか、違う階層を使う場合っていうのは、
-  // これをいくつも用意したうえで適切につなぐ処理した方が楽そうだね
-  // もっとも十字型とかH字型とか凹字型だったら別のテンプレートが必要になるけど。
-}
-
-// 複数版（nは階層数）
-// contoursについては別枠（どこが輪郭になるかでバリエーションがあるので）
-// 作ったうえでの接続については別枠（辺の個数eNumを増やしたり新たに接続を作ったりするので）
-function createMultiRectMazeData(w, h, n){
-
-}
-*/
 
 // たとえばこうする
-// datumの配列とかじゃないよ・・ひとつにおさまってるので。
 // 複数の場合はmultiっていう別のテンプレート用意するといい。2つでも4つでも。(createMultiRectMazeDataとかする)
 // んで取得してからconnectをいじって辺をつなぐなどする
 function createMazeData_0(){
-  let data = createRectMazeData(20, 15, 1);
+  let data = createRectMazeData(40, 30, 1);
   return data;
 }
 // たとえばトーラスにするならこの後でdataをいじってeNum増やしたり接続増やしたりする。
+// 上下をつなぐ
+function createMazeData_1(){
+  let data = createRectMazeData(20, 15, 1);
+  // 0~19と280~299をつなぐ
+  let info = [];
+  for(let i = 0; i < 20; i++){
+    info.push({from:i, to:280 + i, dir:Math.PI * 1.5, separate:true});
+  }
+  data.connect.push(...info);
+  return data;
+}
+// 上下左右をつなぐ
+function createMazeData_2(){
+  let data = createRectMazeData(20, 15, 1);
+  // 0~19と280~299をつなぐ
+  let info = [];
+  for(let i = 0; i < 20; i++){
+    info.push({from:i, to:280 + i, dir:Math.PI * 1.5, separate:true});
+  }
+  // 0,20,40,...,280と19,39,59,...,299をつなぐ
+  for(let j = 0; j < 15; j++){
+    info.push({from:20 * j, to:19 + 20 * j, dir:Math.PI, separate:true});
+  }
+  data.connect.push(...info);
+  return data;
+}
+// 2つのフロアをつなぐ
+function createMazeData_3(){
+  let data = createRectMazeData(20, 15, 2);
+  // 0~19と580~599をつなぐ感じで。
+  let info = [];
+  for(let i = 0; i < 20; i++){
+    info.push({from:i, to:580 + i, dir:Math.PI * 1.5, separate:true});
+    info.push({from:280 + i, to:300 + i, dir:Math.PI * 0.5, separate:true});
+  }
+  // さらに280~299と300~319をつなぎ、0,20,40,...と319,339,359,...もつなぎ、19,39,59,...と300,320,340,...もつなぐ。
+  for(let j = 0; j < 15; j++){
+    info.push({from:20 * j, to:319 + 20 * j, dir:Math.PI, separate:true});
+    info.push({from:19 + 20 * j, to:300 + 20 * j, dir:0, separate:true});
+  }
+  data.connect.push(...info);
+  return data;
+}
+// つなぎ方を変える
+function createMazeData_4(){
+  let data = createRectMazeData(20, 15, 1);
+  // 0~19と299~280をつなぐ（逆順）。さらに0,20,40,...と299,279,259,...をつなぐ（逆順）
+  let info = [];
+  for(let i = 0; i < 20; i++){
+    info.push({from:i, to:299 - i, dir:Math.PI * 1.5, separate:true});
+  }
+  for(let j = 0; j < 15; j++){
+    info.push({from:20 * j, to:299 - 20 * j, dir:Math.PI, separate:true});
+  }
+  data.connect.push(...info);
+  return data;
+}
+// 作ってて思ったけどこれあれだね・・全体像見えなくてもなんとなくゴール到着出来ちゃうね・・うん。
+// となると周囲を暗くして見えなくしても問題ない？ってわけでもなさそうだけど。んー。
+// ここまでくると迷路自体はもはや単なるフィールドでしかないので、敵作ったりしないことには発展しないわね。
+// 前言撤回。40x30でやってみたけどこれゴールわかんない・・最後はもう運だわ
+// 分かれ道でどっちに進んだか覚えておかないと確実に迷う
+// 厳しい・・まあそれはおいといて敵出したいわね。で、マウスダウンでdirectionの方向に発射すると。倒すと。
+// 倒すとなんか落とす。触るとゲット。時間経過で消滅。敵は減ると現れる。そんな感じ？そんな多くないので衝突判定も適当でOK.
 
 // directionの設定
 // プレイヤーの画面内での位置はあっちで計算するのでそれをインプットしてこっちで計算する（マウス使って）
@@ -561,17 +459,12 @@ class Player{
     this.currentEdgeDirection = edg.getDir(0); // 0から1に向かう方向
   }
   update(){
-    /*
-    if(keyIsDown(LEFT_ARROW)){ this.direction += this.rotationSpeed; }
-    else if(keyIsDown(RIGHT_ARROW)){ this.direction -= this.rotationSpeed; }
-    else if(keyIsDown(UP_ARROW)){ this.advance(); }
-    */
     this.advance();
     this.setPosition();
   }
   setDirection(pos){
     // posは画面内でのプレイヤーの位置(maze側から送る)
-    this.direction = atan2(mouseY - pos.y, mouseX - pos.x);
+    this.direction = atan2(mouseY - OFFSET_X - pos.y, mouseX - OFFSET_Y - pos.x);
   }
   setLastVertice(v){
     // たとえば、このときにイベントフラグをONにして・・・
@@ -588,7 +481,7 @@ class Player{
     const dir = this.direction;
     const edgeDir = this.currentEdgeDirection;
     const criterion = cos(dir - edgeDir);
-    if(criterion > 0){ this.progress += this.speed; }else{ this.progress -= this.speed; }
+    this.progress += this.speed * criterion;
     // ここでconstrainをやめる。
     // 0より小さいか1より大きいか
     // 乗り換えの際に候補のedgeがいくつか出現するのね
@@ -603,7 +496,6 @@ class Player{
     }
   }
   operation(){
-    //this.progress = constrain(this.progress, 0, 1);
     // まずたどり着いた頂点をlastVerticeに設定
     // 次にその頂点から伸びる辺でcurrentedgeでないものを洗い出す
     // なければconstrainして処理は終了
@@ -644,14 +536,22 @@ class Player{
   }
   setPosition(){
     // separate辺の場合はz座標についてあれこれする
-    let zCoord;
-    if(this.progress < 0.5){
-      zCoord = this.from.z;
+    if(!this.currentEdge.separate){
+      this.position.set(this.from.x * (1 - this.progress) + this.to.x * this.progress,
+                      this.from.y * (1 - this.progress) + this.to.y * this.progress, this.from.z);
     }else{
-      zCoord = this.to.z;
+      let dir;
+      // そうか、GRID掛けちゃまずかったっけ・・反省・・
+      if(this.progress < 0.5){
+        dir = this.currentEdge.getDir(0);
+        this.position.set(this.from.x + this.progress * cos(dir),
+                        this.from.y + this.progress * sin(dir), this.from.z);
+      }else{
+        dir = this.currentEdge.getDir(1);
+        this.position.set(this.to.x + (1 - this.progress) * cos(dir),
+                        this.to.y + (1 - this.progress) * sin(dir), this.to.z);
+      }
     }
-    this.position.set(this.from.x * (1 - this.progress) + this.to.x * this.progress,
-                      this.from.y * (1 - this.progress) + this.to.y * this.progress, zCoord);
   }
   getPosition(){
     return this.position;
@@ -662,7 +562,7 @@ class Player{
 }
 
 function setup(){
-	createCanvas(640, 480); // 2Dでやる
+	createCanvas(800, 640); // 2Dでやる
   prepareImage();
 
 	const data = createMazeData_0();
