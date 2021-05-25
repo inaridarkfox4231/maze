@@ -7,7 +7,41 @@
 // あと挙動が若干不自然なのをどう解消するのか
 // などなど
 
-let _IMAGE; // すべてのイメージ。とりあえず400x100にして左から順に床、スタート、ゴール、壁。
+// 徘徊オブジェクトの仕様
+// どっかの頂点に出現
+// どっかの辺に乗る
+// 辺から辺へ
+// 頂点では基本的にいずれか選んで移動、来た方向以外で。
+// 行けない場合に引き返す。
+// プレイヤーの移動ルーチンと違ってdirectionが出てこない（選択肢から選ぶだけ）ので楽だと思う
+// 移動スピードで個性を出せる感じ
+// そこまでできたらなんか出させる。攻撃っぽい何か。
+// こちらも攻撃っぽい何かを出せるようにする
+// 当たる仕様まで作るならHPとかダメージ量とかも必要になりそう・・
+
+// まず頂点について、ゴールまでの最短ルート上の頂点というのはゴールまで行く場合すべて必ず通ることになってる
+// どこを通行不能にしてもたどり着けない
+// だからたとえばどっかにカギをおいてそれで扉を開けさせることも可能
+// valueについてはvalueが大きいマスはそれよりvalueが小さいマスより先には到達出来ないから
+// 最短ルート上のどっかのマスを不能にしてそこを開けるカギをそれよりvalueの小さいマスにランダムに置いてもまったく問題ない
+// ただたいていの場合ルート上に置かれちゃうのがまずいところ（まあそれは仕方ないのだけど・・）
+// フラグでonRoute=true/falseでonRouteでかつvalueがgoalの1割～9割のマスにフラッグを置きたいのよね.
+// オリエンテーリングでよくあるあれ
+// スタートは赤フラッグ（文字S）、ゴールは紫フラッグ（文字G）
+// やめ
+// 32x32をくるくる、でいいのでは。
+// 四角形に(32,0)→(0,32)の線を引いてその下が色で上が文字。裏は灰色、これがくるくるする。OK!
+// 同時にふんわり浮かせる（やや高めの所をsinで小さくふわふわ）
+// って思ったけどよく考えたらonRouteに置いちゃったらヒントになってしまうので
+// まあ別にいいか
+// onRouteの1割~9割に置く！
+// 3%～7%の頂点からランダムチョイスしてどっかにカギ置いてそれ取らないと空かないようにしたら面白そう
+// いいや・・・はやくフラッグ置こう
+
+// onRouteできました(疲れた・・・）
+
+let _IMAGES = []; // とりあえずスタートとゴールとポイントの画像11個からなる配列おねがいね
+const FLAG_ROTATE_TERM = 180; // フラッグの回転のスパン
 
 // 表示のオフセット
 const OFFSET_X = 80;
@@ -64,6 +98,7 @@ class Vertice extends Component{
 		this.position = createVector(x, y, z);
 		this.type = undefined;
 		this.value = 0; // 作成時にこの値を更新に使うことでスタートを割り出しその後すべての値をリセットしたうえでゴールを探す感じですかね
+    this.onRoute = false; // ゴールへ続く道の途中にあるかないか
 	}
 	setType(_type){
 		this.type = _type;
@@ -77,6 +112,12 @@ class Vertice extends Component{
 	getValue(){
 		return this.value;
 	}
+  setOnRoute(flag){
+    this.onRoute = flag;
+  }
+  getOnRoute(){
+    return this.onRoute;
+  }
   // 特定の頂点のdrawに使う・・？
 }
 
@@ -118,7 +159,16 @@ class Maze{
 		this.start = undefined; // 最初の頂点を設定し、それよりvalueの大きな頂点で随時更新し続ける
 		this.goal = undefined; // valueの値を全部リセットしかつstartを起点としてサーチを進め、同じように更新し続ける感じ
 
-    this.player = new Player(); // player動かすのもいろいろ考えないとね・・ // プレイヤーは後回し
+    this.flags = []; // フラッグたち
+    for(let i = 0; i < 11; i++){
+      this.flags.push(new Flag(_IMAGES[i]));
+    }
+
+    this.player = new Player(); // player動かすのもいろいろ考えないとね・・
+    this.enemyArray = [];
+    for(let i = 0; i < 5; i++){
+      this.enemyArray.push(new Enemy());
+    }
 	}
 	prepareComponents(data){
 		const {vNum:vn} = data;
@@ -216,16 +266,34 @@ class Maze{
 		this.goal.setType(GOAL);
     this.createFloorGraphics();
 
-    this.player.setting(this.start); // プレイヤーは後回し。
+    // オブジェクトの配置メソッドはそのうち別立て処理にする
+    this.player.setting(this.start);
+    for(let en of this.enemyArray){ en.setting(random(this.verticeArray)); }
 	}
 	searchGoal(){
 		// すべてのvalueを0にする→currentVerticeとgoalをstartにして出発→connectedな辺でUNCHECKEDなものだけ選んで進みvalueを1大きいものにしていく
 		// その過程で随時goalを更新→CHECKEDしかないなら引き返すしその場合は更新しない
 		// edgeStackを使うことで空になったときに終了ってできるのでそうする（戻るときにpopするなど、作成時の処理と同様）
 		// 正確には「edgeStackが空」なおかつ「その頂点から行ける場所が皆無」。
+
+    // onRouteについて
+    // onRouteどうしようね？？？ゴールからさかのぼっていくしかない？？？
+    // 辺に向きがつくのね
+    // 向きはedgeStackに放り込んだ時のcurrentからnextへの向き
+    // このときのnextにおけるedgeのindexを記録しておく
+    // verticeの数だけの配列を用意しておいて
+    // 各indexのところにそれがnextのときのつなぐ辺の出ているindexを記録しておく
+    // 最後にgoalからgoalも含めてそのedgeのindexにしたがってさかのぼっていって
+    // startまでいく、その過程をすべてonRouteにすればいい。OK!
+
+    // これです
+    let indexArray = new Array(this.verticeArray.length);
+    // indexArray[v.getIndex()] = 「さかのぼるときに選ぶ辺のconnectedにおけるindexというかgetCmp(~~)に入れる引数」
+
 		for(let v of this.verticeArray){ v.setValue(0); }
 		this.goal = this.start;
 		this.currentVertice = this.start;
+    this.start.setOnRoute(true);
 		let debug = 99999;
 		while(debug--){
 		  const uncheckedEdges = this.currentVertice.connected.filter((e) => {
@@ -244,12 +312,58 @@ class Maze{
 			const v = this.currentVertice.getValue();
 			nextVertice.setValue(v + 1);
 			if(this.goal.getValue() < v + 1){ this.goal = nextVertice; }
+      // ここでnextVerticeにおいてconnectedEdgeが何番なのかサーチする
+      const targetIndex = connectedEdge.getIndex();
+      for(let i = 0; i < nextVertice.connected.length; i++){
+        if(nextVertice.getCmp(i).getIndex() === targetIndex){
+          indexArray[nextVertice.getIndex()] = i;
+          break;
+        }
+      }
 			this.currentVertice = nextVertice;
 			this.edgeStack.push(connectedEdge);
 		}
+    // 今からgoalからstartまで一気にさかのぼっていきます。
+    // その過程で1～9合目が見つかったら随時フラッグに画像をセットしていきます
+    // めんどくさい・・・・・
+    // 思いついたよ。
+    // tmpVはこの探索においてゴール以外のすべての頂点を網羅している
+    // いま長さ9の配列を用意して、floor(value*10/goalValue)が正だったら
+    // それを-1してindexとしてそこに頂点のindexをぶち込んで逐次更新して
+    // 最後に残ったすべての頂点のindexが1合目～9合目に相当する！
+    // 失敗・・・・・なぜ？
+    let flagIndexArray = new Array(9);
+    this.flags[0].setPosition(this.start.position);
+    this.flags[10].setPosition(this.goal.position);
+    const goalValue = this.goal.getValue();
+    this.goal.setOnRoute(true);
+    this.currentVertice = this.goal;
+    debug = 99999;
+    const startIndex = this.start.getIndex();
+    let id = this.currentVertice.getIndex();
+    let flagIndex;
+    while(debug--){
+      // indexArrayの情報をもとに頂点をさかのぼります
+      let tmpE = this.currentVertice.getCmp(indexArray[id]);
+      let tmpV = tmpE.getOther(this.currentVertice);
+      // 途中のマスをすべてtrueにしていきます
+      tmpV.setOnRoute(true);
+      // tmpVのvalueがgoalValueの0.1倍~0.9倍の整数部分なら・・ってやる。
+      this.currentVertice = tmpV;
+      id = tmpV.getIndex();
+      flagIndex = floor(tmpV.getValue() * 10 / goalValue);
+      if(flagIndex > 0){
+        flagIndexArray[flagIndex - 1] = id;
+      }
+      if(id === startIndex){ break; } // startに着いたら終了
+    }
+    for(let k = 1; k < 10; k++){
+      this.flags[k].setPosition(this.verticeArray[flagIndexArray[k - 1]].position);
+    }
 	}
   createFloorGraphics(){
     const L = GRID * 0.5;
+    // onRouteの頂点だけ色を付けてテストしたいよね
     for(let e of this.edgeArray){
       if(e.getState() === IS_NOT_PASSABLE){ continue; }
       const v0 = e.getCmp(0).position;
@@ -270,6 +384,10 @@ class Maze{
     const pos = this.getDrawPos(this.player.position);
     this.player.setDirection(pos);
     this.player.update();
+
+    for(let fl of this.flags){ fl.update(); }
+
+    for(let en of this.enemyArray){ en.update(); }
   }
   getOffSet(p){
     // pをプレイヤーのグローバルな位置としたときの画像の貼り付けの左上座標。
@@ -290,20 +408,27 @@ class Maze{
     // image関数の使い方に注意してね
     this.base.image(this.floorArray[currentFloorIndex], 0, 0, this.w, this.h, offSet.x, offSet.y, this.w, this.h);
     this.base.noStroke();
-    if(this.start.position.z === currentFloorIndex){
-      this.base.fill(255, 128, 0);
-      const s = this.getDrawPos(this.start.position, offSet);
-      this.base.circle(s.x, s.y, GRID * 0.8);
+
+    // 描画に関してはそのうちbaseを渡してそこに描くようにしたいけど・・
+    for(let fl of this.flags){
+      fl.draw();
+      if(fl.position.z === currentFloorIndex){
+        const p = this.getDrawPos(fl.position, offSet);
+        this.base.image(fl.gr, p.x - GRID * 0.5, p.y - GRID * 0.5);
+      }
     }
-    if(this.goal.position.z === currentFloorIndex){
-      this.base.fill(0, 128, 255);
-      const g = this.getDrawPos(this.goal.position, offSet);
-      this.base.circle(g.x, g.y, GRID * 0.8);
-    }
-    // このあとスタート、ゴール、プレイヤーの表示。
+
+    // このあとプレイヤーとエネミーの表示。
     this.base.fill(128, 255, 128);
     const p = this.getDrawPos(this.player.position, offSet);
     this.base.circle(p.x, p.y, GRID * 0.4);
+
+    this.base.fill(128);
+    for(let en of this.enemyArray){
+      const q = this.getDrawPos(en.position, offSet);
+      this.base.square(q.x - GRID * 0.2, q.y - GRID * 0.2, GRID * 0.4);
+    }
+
     image(this.base, OFFSET_X, OFFSET_Y);
     //noLoop();
 	}
@@ -355,11 +480,14 @@ function createRectMazeData(w, h, n){
   return data;
 }
 
+// ひし形、三角形、八角形と正方形の組み合わせ、くらいは考えてる。
+// あと六角形も。もうハニカムでいいと思う。難しく考えないで。
+
 // たとえばこうする
 // 複数の場合はmultiっていう別のテンプレート用意するといい。2つでも4つでも。(createMultiRectMazeDataとかする)
 // んで取得してからconnectをいじって辺をつなぐなどする
 function createMazeData_0(){
-  let data = createRectMazeData(40, 30, 1);
+  let data = createRectMazeData(20, 15, 1);
   return data;
 }
 // たとえばトーラスにするならこの後でdataをいじってeNum増やしたり接続増やしたりする。
@@ -428,43 +556,38 @@ function createMazeData_4(){
 // 厳しい・・まあそれはおいといて敵出したいわね。で、マウスダウンでdirectionの方向に発射すると。倒すと。
 // 倒すとなんか落とす。触るとゲット。時間経過で消滅。敵は減ると現れる。そんな感じ？そんな多くないので衝突判定も適当でOK.
 
-// directionの設定
-// プレイヤーの画面内での位置はあっちで計算するのでそれをインプットしてこっちで計算する（マウス使って）
-class Player{
+// うごめくもの
+// まあ、敵とアイテム、かなぁ
+// 敵の場合は種類を渡してそれによりスピードHP攻撃力グラフィックもろもろ設定される感じ？
+// プレイヤーもそのうちグラフィック用意されるし
+class Wanderer{
   constructor(){
     this.currentEdge = undefined;
     this.progress = 0;
-    this.from = createVector(0, 0);
-    this.to = createVector(0, 0);
+    this.from = createVector(0, 0, 0);
+    this.to = createVector(0, 0, 0);
     this.currentEdgeDirection = 0;
     this.position = createVector(0, 0, 0); // 3番目の引数はフロア番号
     this.direction = 0;
     this.lastVertice = undefined; // 最後に訪れた頂点。edgeの乗り換えの際に更新される感じ。
-    this.speed = 0.125; // 8フレームで1GRID移動する感じ。
+    this.speed = 0; // いろいろ。
   }
-  setting(start){
-    for(let index = 0; index < start.connected.length; index++){
-      const edg = start.getCmp(index);
-      if(edg.getState() === IS_PASSABLE){
-        this.setEdge(edg);
-        if(start.getIndex() === edg.getCmp(0).getIndex()){ this.progress = 0; }else{ this.progress = 1; }
-        break;
-      }
+  setting(v){
+    const candidate = v.connected.filter((e) => { return e.cmp.state === IS_PASSABLE });
+    const edg = random(candidate).cmp;
+    this.setEdge(edg);
+    // directionの初期値がないとまずいね（playerはマウスで決めるが任意移動には使えないので）
+    if(v.getIndex() === edg.getCmp(0).getIndex()){
+      this.progress = 0; this.direction = edg.getDir(0);
+    }else{
+      this.progress = 1; this.direction = edg.getDir(1);
     }
   }
-  setEdge(edg){
-    this.currentEdge = edg;
-    this.from = edg.getCmp(0).position;
-    this.to = edg.getCmp(1).position;
-    this.currentEdgeDirection = edg.getDir(0); // 0から1に向かう方向
-  }
-  update(){
-    this.advance();
-    this.setPosition();
-  }
-  setDirection(pos){
-    // posは画面内でのプレイヤーの位置(maze側から送る)
-    this.direction = atan2(mouseY - OFFSET_X - pos.y, mouseX - OFFSET_Y - pos.x);
+  setEdge(e){
+    this.currentEdge = e;
+    this.from = e.getCmp(0).position;
+    this.to = e.getCmp(1).position;
+    this.currentEdgeDirection = e.getDir(0); // 0から1に向かう方向
   }
   setLastVertice(v){
     // たとえば、このときにイベントフラグをONにして・・・
@@ -475,6 +598,49 @@ class Player{
     // ワナだったらその際に床で置き換えるなど。ああでも動的更新できない・・？？それは不必要だよ。
     // ん－・・テクスチャでインチキして画像差し替えちゃえばできるよ（え）
     return this.lastVertice;
+  }
+  getPosition(){
+    return this.position;
+  }
+  getDirection(){
+    return this.direction;
+  }
+  update(){
+    this.advance();
+    this.setPosition();
+  }
+  advance(){}
+  operation(){}
+  setPosition(){
+    // separate辺の場合はz座標についてあれこれする
+    if(!this.currentEdge.separate){
+      this.position.set(this.from.x * (1 - this.progress) + this.to.x * this.progress,
+                      this.from.y * (1 - this.progress) + this.to.y * this.progress, this.from.z);
+    }else{
+      let dir;
+      // そうか、GRID掛けちゃまずかったっけ・・反省・・
+      if(this.progress < 0.5){
+        dir = this.currentEdge.getDir(0);
+        this.position.set(this.from.x + this.progress * cos(dir), this.from.y + this.progress * sin(dir), this.from.z);
+      }else{
+        dir = this.currentEdge.getDir(1);
+        this.position.set(this.to.x + (1 - this.progress) * cos(dir), this.to.y + (1 - this.progress) * sin(dir), this.to.z);
+      }
+    }
+  }
+}
+
+// directionの設定
+// プレイヤーの画面内での位置はあっちで計算するのでそれをインプットしてこっちで計算する（マウス使って）
+class Player extends Wanderer{
+  constructor(){
+    super();
+    this.speed = 0.125; // 8フレームで1GRID移動する感じ。
+  }
+  setDirection(pos){
+    // posは画面内でのプレイヤーの位置(maze側から送る)
+    // マウス位置の取得情報はOFFSETでいじる（迷路ボードの表示位置）
+    this.direction = atan2(mouseY - OFFSET_X - pos.y, mouseX - OFFSET_Y - pos.x);
   }
   advance(){
     // prgを増減させる
@@ -534,38 +700,90 @@ class Player{
       this.progress = constrain(this.progress, 0, 1); return;
     }
   }
-  setPosition(){
-    // separate辺の場合はz座標についてあれこれする
-    if(!this.currentEdge.separate){
-      this.position.set(this.from.x * (1 - this.progress) + this.to.x * this.progress,
-                      this.from.y * (1 - this.progress) + this.to.y * this.progress, this.from.z);
+}
+
+// 敵の場合
+// 種類により辺の選び方が違ったりする？
+class Enemy extends Wanderer{
+  constructor(){
+    super();
+    this.speed = 0.05;
+  }
+  advance(){
+    const criterion = cos(this.direction - this.currentEdgeDirection); // 基本1か-1的な
+    this.progress += this.speed * criterion;
+    if(this.progress < 0 || this.progress > 1){ this.operation(); }
+  }
+  operation(){
+    // indexを取得→たどり着いた頂点を取得→lastVerticeに登録→来た方向を調べてそっちではない進める辺をランダムで取得
+    // それが存在しなければcurrentEdgeに変更はない、directionを逆にする（PIを足す）のをやってから離脱
+    // 存在するならそれをセットする。おわり。
+    const index = (this.progress < 0 ? 0 : 1);
+    const v = this.currentEdge.getCmp(index);
+    this.setLastVertice(v);
+    const dir = this.direction;
+    // 通れる辺で今通ってきたのとは別の辺
+    const candidate = v.connected.filter((e) => {
+      return e.cmp.getState() === IS_PASSABLE && e.cmp.getIndex() !== this.currentEdge.getIndex();
+    });
+    if(candidate.length === 0){
+      // もともと来た辺を逆走する
+      this.direction += Math.PI;
+      this.progress = constrain(this.progress, 0, 1);
+      return;
     }else{
-      let dir;
-      // そうか、GRID掛けちゃまずかったっけ・・反省・・
-      if(this.progress < 0.5){
-        dir = this.currentEdge.getDir(0);
-        this.position.set(this.from.x + this.progress * cos(dir),
-                        this.from.y + this.progress * sin(dir), this.from.z);
+      // 候補からランダムに選ぶ感じ
+      const nextEdge = random(candidate).cmp;
+      this.setEdge(nextEdge);
+      if(v.getIndex() === nextEdge.getCmp(0).getIndex()){
+        this.progress = 0; this.direction = nextEdge.getDir(0);
       }else{
-        dir = this.currentEdge.getDir(1);
-        this.position.set(this.to.x + (1 - this.progress) * cos(dir),
-                        this.to.y + (1 - this.progress) * sin(dir), this.to.z);
+        this.progress = 1; this.direction = nextEdge.getDir(1);
       }
     }
   }
-  getPosition(){
-    return this.position;
+}
+
+class Flag{
+  constructor(_img){
+    this.img = _img;
+    this.gr = createGraphics(GRID, GRID);
+    this.gr.fill(128);
+    this.gr.noStroke();
+    this.durationCount = floor(random(FLAG_ROTATE_TERM));
+    this.position = createVector(0, 0, 0);
   }
-  getDirection(){
-    return this.direction;
+  setImg(_img){
+    this.img = _img;
+  }
+  setPosition(pos){
+    this.position.set(pos);
+  }
+  update(){
+    this.durationCount++;
+    if(this.durationCount === FLAG_ROTATE_TERM){
+      this.durationCount = 0;
+    }
+  }
+  draw(){
+    if(this.durationCount === 0){ return; } // よくわからんけど0でエラーが生じてるので暫定処理
+    const progress = this.durationCount / FLAG_ROTATE_TERM;
+    this.gr.clear();
+    const x = GRID * 0.5 * (1 - abs(sin(progress * TAU)));
+    const l = GRID - 2 * x;
+    if(progress < 0.5){
+      this.gr.image(this.img, x, 0, l, GRID, 0, 0, GRID, GRID);
+    }else{
+      this.gr.rect(x, 0, l, GRID);
+    }
   }
 }
 
 function setup(){
 	createCanvas(800, 640); // 2Dでやる
-  prepareImage();
+  prepareFlagImage();
 
-	const data = createMazeData_0();
+	const data = createMazeData_3();
 	master = new Maze();
   // 以下の処理はステージ開始時に行われるようにしていきたい・・
   // 同じ形式ならinitializeでいいけど迷路のスタイルを変える場合はふたたびデータ作ってprepareComponentsで
@@ -580,25 +798,24 @@ function draw(){
 	master.draw();
 }
 
-function prepareImage(){
-  _IMAGE = createGraphics(200, 100);
-  let gr = _IMAGE;
-  gr.textSize(60);
-  gr.textAlign(CENTER, CENTER);
-  // スタート
-  for(let i = 0; i < 50; i++){
-		gr.fill(5, 100 - 2 * i, 100);
-		gr.rect(100 + i, i, 100 - 2 * i, 100 - 2 * i);
-	}
-  gr.fill(0);
-	gr.text("S", 150, 50);
-  // ゴール
-  for(let i = 0; i < 50; i++){
-		gr.fill(75, 100 - 2 * i, 100);
-		gr.rect(200 + i, i, 100 - 2 * i, 100 - 2 * i);
-	}
-  gr.fill(0);
-	gr.text("G", 250, 50);
+// モデルを作る・・オリエンテーリングのあれみたいな感じで。
+// と思ったけどS,0,1,2,3,4,5,6,7,8,9,Gの11種類のフラッグ画像作ってね。
+// 裏側は灰色で。それをくるくるまわす。
+function prepareFlagImage(){
+  const texts = ["S", "1", "2", "3", "4", "5", "6", "7", "8", "9", "G"];
+  for(let i = 0; i < 11; i++){
+    let gr = createGraphics(GRID, GRID);
+    gr.colorMode(HSB, 100);
+    gr.noStroke();
+    gr.background(220);
+    gr.fill(i * 8, 100, 100);
+    gr.triangle(0, GRID, GRID, GRID, GRID, 0);
+    gr.fill(0);
+    gr.textAlign(CENTER, CENTER);
+    gr.textSize(GRID * 0.5);
+    gr.text(texts[i], GRID * 0.25, GRID * 0.25);
+    _IMAGES.push(gr);
+  }
 }
 
 // とりあえずクリックで再生成できるようになってるけど暫定処理ね
