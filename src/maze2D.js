@@ -39,6 +39,11 @@
 // いいや・・・はやくフラッグ置こう
 
 // onRouteできました(疲れた・・・）
+// フラッグ立てたよ。立てたけど・・onRoute要らんやんな・・
+// なんかの役には立つだろうから残しといて（（（
+
+// オブジェクトがへんなとこ移動してる
+// どうもフロアの切り替えで失敗してるっぽい→直した
 
 let _IMAGES = []; // とりあえずスタートとゴールとポイントの画像11個からなる配列おねがいね
 const FLAG_ROTATE_TERM = 180; // フラッグの回転のスパン
@@ -215,7 +220,7 @@ class Maze{
 	}
 	initialize(seed = -1){
 		// 状態の初期化と起点の設定
-	  for(let v of this.verticeArray){ v.setState(UNREACHED); v.setType(NORMAL); }
+	  for(let v of this.verticeArray){ v.setState(UNREACHED); v.setType(NORMAL); v.setOnRoute(false); }
 		for(let e of this.edgeArray){ e.setState(UNDETERMINED); e.setFlag(UNCHECKED); }
 		// 一応シードつけておくか
 		if(seed >= 0){ randomSeed(seed); }
@@ -425,6 +430,7 @@ class Maze{
 
     this.base.fill(128);
     for(let en of this.enemyArray){
+      if(en.position.z !== currentFloorIndex){ continue; } // ごめんなさい違うフロアにいるときも描画してました。。
       const q = this.getDrawPos(en.position, offSet);
       this.base.square(q.x - GRID * 0.2, q.y - GRID * 0.2, GRID * 0.4);
     }
