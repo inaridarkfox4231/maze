@@ -1,49 +1,3 @@
-// TODO
-// 余計なコードの削除
-// トーラス構造でのテスト
-// 線の装飾や背景はどうするか
-// オフセットは機能しているのか（大きなサイズでもきちんと動くのか）
-// 各種アイコン、プレイヤーの表示
-// あと挙動が若干不自然なのをどう解消するのか
-// などなど
-
-// 徘徊オブジェクトの仕様
-// どっかの頂点に出現
-// どっかの辺に乗る
-// 辺から辺へ
-// 頂点では基本的にいずれか選んで移動、来た方向以外で。
-// 行けない場合に引き返す。
-// プレイヤーの移動ルーチンと違ってdirectionが出てこない（選択肢から選ぶだけ）ので楽だと思う
-// 移動スピードで個性を出せる感じ
-// そこまでできたらなんか出させる。攻撃っぽい何か。
-// こちらも攻撃っぽい何かを出せるようにする
-// 当たる仕様まで作るならHPとかダメージ量とかも必要になりそう・・
-
-// まず頂点について、ゴールまでの最短ルート上の頂点というのはゴールまで行く場合すべて必ず通ることになってる
-// どこを通行不能にしてもたどり着けない
-// だからたとえばどっかにカギをおいてそれで扉を開けさせることも可能
-// valueについてはvalueが大きいマスはそれよりvalueが小さいマスより先には到達出来ないから
-// 最短ルート上のどっかのマスを不能にしてそこを開けるカギをそれよりvalueの小さいマスにランダムに置いてもまったく問題ない
-// ただたいていの場合ルート上に置かれちゃうのがまずいところ（まあそれは仕方ないのだけど・・）
-// フラグでonRoute=true/falseでonRouteでかつvalueがgoalの1割～9割のマスにフラッグを置きたいのよね.
-// オリエンテーリングでよくあるあれ
-// スタートは赤フラッグ（文字S）、ゴールは紫フラッグ（文字G）
-// やめ
-// 32x32をくるくる、でいいのでは。
-// 四角形に(32,0)→(0,32)の線を引いてその下が色で上が文字。裏は灰色、これがくるくるする。OK!
-// 同時にふんわり浮かせる（やや高めの所をsinで小さくふわふわ）
-// って思ったけどよく考えたらonRouteに置いちゃったらヒントになってしまうので
-// まあ別にいいか
-// onRouteの1割~9割に置く！
-// 3%～7%の頂点からランダムチョイスしてどっかにカギ置いてそれ取らないと空かないようにしたら面白そう
-// いいや・・・はやくフラッグ置こう
-
-// onRouteできました(疲れた・・・）
-// フラッグ立てたよ。立てたけど・・onRoute要らんやんな・・
-// なんかの役には立つだろうから残しといて（（（
-
-// オブジェクトがへんなとこ移動してる
-// どうもフロアの切り替えで失敗してるっぽい→直した
 
 let _IMAGES = []; // とりあえずスタートとゴールとポイントの画像11個からなる配列おねがいね
 const FLAG_ROTATE_TERM = 180; // フラッグの回転のスパン
@@ -51,6 +5,9 @@ const FLAG_ROTATE_TERM = 180; // フラッグの回転のスパン
 // 表示のオフセット
 const OFFSET_X = 80;
 const OFFSET_Y = 80;
+
+const DISPLAY_WIDTH = 640;
+const DISPLAY_HEIGHT = 480;
 
 // スタートとゴールと通常床（とワナ？？）
 const NORMAL = 0;
@@ -336,7 +293,6 @@ class Maze{
     // いま長さ9の配列を用意して、floor(value*10/goalValue)が正だったら
     // それを-1してindexとしてそこに頂点のindexをぶち込んで逐次更新して
     // 最後に残ったすべての頂点のindexが1合目～9合目に相当する！
-    // 失敗・・・・・なぜ？
     let flagIndexArray = new Array(9);
     this.flags[0].setPosition(this.start.position);
     this.flags[10].setPosition(this.goal.position);
@@ -426,13 +382,13 @@ class Maze{
     // このあとプレイヤーとエネミーの表示。
     this.base.fill(128, 255, 128);
     const p = this.getDrawPos(this.player.position, offSet);
-    this.base.circle(p.x, p.y, GRID * 0.4);
+    this.base.square(p.x - GRID * 0.3, p.y - GRID * 0.3, GRID * 0.6);
 
-    this.base.fill(128);
+    this.base.fill(255);
     for(let en of this.enemyArray){
       if(en.position.z !== currentFloorIndex){ continue; } // ごめんなさい違うフロアにいるときも描画してました。。
       const q = this.getDrawPos(en.position, offSet);
-      this.base.square(q.x - GRID * 0.2, q.y - GRID * 0.2, GRID * 0.4);
+      this.base.square(q.x - GRID * 0.4, q.y - GRID * 0.4, GRID * 0.8);
     }
 
     image(this.base, OFFSET_X, OFFSET_Y);
@@ -782,6 +738,33 @@ class Flag{
     }else{
       this.gr.rect(x, 0, l, GRID);
     }
+  }
+}
+
+// 攻撃クラスって感じでよろしく・・
+class Weapon{
+  constructor(){}
+}
+
+// 当たり判定は円（敵とかプレイヤーとか全部円）
+class Bullet extends Weapon{
+  constructor(){
+    super();
+  }
+}
+
+// 当たり判定は線分（箇所によりダメージが変化）
+class Lance extends Weapon{
+  constructor(){
+    super();
+  }
+}
+
+// 当たり判定は半直線（スリップダメージ、当たっている間常にダメージ）
+// ギミックとしてのレーザーもあるかも
+class Laser extends Weapon{
+  constructor(){
+    super();
   }
 }
 
