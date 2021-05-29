@@ -61,7 +61,18 @@ class Vertice extends Component{
 		this.type = undefined;
 		this.value = 0; // 作成時にこの値を更新に使うことでスタートを割り出しその後すべての値をリセットしたうえでゴールを探す感じですかね
     this.onRoute = false; // ゴールへ続く道の途中にあるかないか
+    this.degree = 0; // 次数（出ている辺の本数、connectedのlengthではなくIS_PASSABLEな辺の本数なので注意）
+    // degreeの計算・・IS_PASSABLEが確定するたびにその両端の頂点に+1していけばOK.
 	}
+  resetDegree(){
+    this.degree = 0;
+  }
+  increaseDegree(){
+    this.degree++;
+  }
+  decreaseDegree(){
+    this.degree--;
+  }
 	setType(_type){
 		this.type = _type;
 	}
@@ -90,7 +101,14 @@ class Edge extends Component{
 		this.flag = undefined; // ゴールサーチ用
     this.separate = _separate; // 分かれてるかどうかっていう。
     // connectedに方向情報入れることにしたのでdirectionは廃止。
+    this.visible = false; // プレイヤーが通ったら白で塗る
 	}
+  setVisible(_visible){
+    this.visible = _visible;
+  }
+  getVisible(){
+    return this.visible;
+  }
 	setFlag(_flag){
 		this.flag = _flag;
 	}
@@ -170,15 +188,16 @@ class Maze{
     this.h = data.h * GRID;
     for(let i = 0; i < data.floorNum; i++){
       let gr = createGraphics(this.w, this.h);
-      gr.stroke(255);
+      gr.stroke(64); // 通ったところは白で
       gr.strokeWeight(GRID * 0.1);
       this.floorArray.push(gr);
     }
 	}
 	initialize(seed = -1){
 		// 状態の初期化と起点の設定
-	  for(let v of this.verticeArray){ v.setState(UNREACHED); v.setType(NORMAL); v.setOnRoute(false); }
-		for(let e of this.edgeArray){ e.setState(UNDETERMINED); e.setFlag(UNCHECKED); }
+    // これリセットでまとめて書いた方がいい
+	  for(let v of this.verticeArray){ v.setState(UNREACHED); v.setType(NORMAL); v.setOnRoute(false); v.resetDegree(); }
+		for(let e of this.edgeArray){ e.setState(UNDETERMINED); e.setFlag(UNCHECKED); e.setVisible(false); }
 		// 一応シードつけておくか
 		if(seed >= 0){ randomSeed(seed); }
 		this.currentVertice = random(this.verticeArray);
@@ -202,6 +221,10 @@ class Maze{
 				const v = this.currentVertice.getValue();
 				nextVertice.setValue(v + 1);
 				if(this.start.getValue() < v + 1){ this.start = nextVertice; } // スタート位置更新
+        // degreeをそれぞれ増やす
+        this.currentVertice.increaseDegree();
+        nextVertice.increaseDegree();
+        // currentVerticeを更新
 				this.currentVertice = nextVertice;
 				this.edgeStack.push(connectedEdge);
 				return FORWARD;
@@ -323,32 +346,54 @@ class Maze{
     }
 	}
   createFloorGraphics(){
-    const L = GRID * 0.5;
+    //const L = GRID * 0.5;
     // onRouteの頂点だけ色を付けてテストしたいよね
     for(let e of this.edgeArray){
       if(e.getState() === IS_NOT_PASSABLE){ continue; }
-      const v0 = e.getCmp(0).position;
-      const v1 = e.getCmp(1).position;
-      const dir0 = e.getDir(0);
-      const dir1 = e.getDir(1);
-      const z0 = int(v0.z);
-      const z1 = int(v1.z);
-      if(!e.separate){
-        this.floorArray[z0].line(v0.x * GRID, v0.y * GRID, v1.x * GRID, v1.y * GRID);
-      }else{
-        this.floorArray[z0].line(v0.x * GRID, v0.y * GRID, v0.x * GRID + L * cos(dir0), v0.y * GRID + L * sin(dir0));
-        this.floorArray[z1].line(v1.x * GRID, v1.y * GRID, v1.x * GRID + L * cos(dir1), v1.y * GRID + L * sin(dir1));
-      }
+      this.drawEdge(e); // 辺描画をメソッド化
+    }
+    for(let fg of this.floorArray){ fg.stroke(255); }
+  }
+  drawEdge(e){
+    const L = GRID * 0.5;
+    const v0 = e.getCmp(0).position;
+    const v1 = e.getCmp(1).position;
+    const dir0 = e.getDir(0);
+    const dir1 = e.getDir(1);
+    const z0 = int(v0.z);
+    const z1 = int(v1.z);
+    if(!e.separate){
+      this.floorArray[z0].line(v0.x * GRID, v0.y * GRID, v1.x * GRID, v1.y * GRID);
+    }else{
+      this.floorArray[z0].line(v0.x * GRID, v0.y * GRID, v0.x * GRID + L * cos(dir0), v0.y * GRID + L * sin(dir0));
+      this.floorArray[z1].line(v1.x * GRID, v1.y * GRID, v1.x * GRID + L * cos(dir1), v1.y * GRID + L * sin(dir1));
     }
   }
   update(){
     const pos = this.getDrawPos(this.player.position);
     this.player.setDirection(pos);
     this.player.update();
+    this.eventCheck(); // イベントフラグがONならイベントを実行してフラグを折る
 
     for(let fl of this.flags){ fl.update(); }
 
     for(let en of this.enemyArray){ en.update(); }
+  }
+  eventCheck(){
+    if(this.player.getEventFlag()){
+      // とりあえず到達した頂点についてそこについてる辺をとりだす
+      const v = this.player.getLastVertice();
+      // 辺が見えていなければ見えるようにする
+      for(let eData of v.connected){
+        let e = eData.cmp;
+        if(e.getState() === IS_NOT_PASSABLE){ continue; }
+        if(!e.getVisible()){
+          e.setVisible(true);
+          this.drawEdge(e);
+        }
+      }
+      this.player.setEventFlag(false);
+    }
   }
   getOffSet(p){
     // pをプレイヤーのグローバルな位置としたときの画像の貼り付けの左上座標。
@@ -598,6 +643,13 @@ class Player extends Wanderer{
   constructor(){
     super();
     this.speed = 0.125; // 8フレームで1GRID移動する感じ。
+    this.eventFlag = false;
+  }
+  setEventFlag(flag){
+    this.eventFlag = flag;
+  }
+  getEventFlag(){
+    return this.eventFlag;
   }
   setDirection(pos){
     // posは画面内でのプレイヤーの位置(maze側から送る)
@@ -635,6 +687,7 @@ class Player extends Wanderer{
     const index = (this.progress < 0 ? 0 : 1);
     const vtc = this.currentEdge.getCmp(index);
     this.setLastVertice(vtc);
+    this.setEventFlag(true); // イベントフラグをONにする
     const dir = this.direction;
     let edgeDir;
     let nextEdge = undefined;
@@ -666,6 +719,7 @@ class Player extends Wanderer{
 
 // 敵の場合
 // 種類により辺の選び方が違ったりする？
+// 攻撃とかさせないでジャンプでかわす感じになりそう
 class Enemy extends Wanderer{
   constructor(){
     super();
@@ -738,33 +792,6 @@ class Flag{
     }else{
       this.gr.rect(x, 0, l, GRID);
     }
-  }
-}
-
-// 攻撃クラスって感じでよろしく・・
-class Weapon{
-  constructor(){}
-}
-
-// 当たり判定は円（敵とかプレイヤーとか全部円）
-class Bullet extends Weapon{
-  constructor(){
-    super();
-  }
-}
-
-// 当たり判定は線分（箇所によりダメージが変化）
-class Lance extends Weapon{
-  constructor(){
-    super();
-  }
-}
-
-// 当たり判定は半直線（スリップダメージ、当たっている間常にダメージ）
-// ギミックとしてのレーザーもあるかも
-class Laser extends Weapon{
-  constructor(){
-    super();
   }
 }
 
