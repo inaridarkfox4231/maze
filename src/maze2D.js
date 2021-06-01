@@ -2,6 +2,10 @@
 let _IMAGES = []; // とりあえずスタートとゴールとポイントの画像11個からなる配列おねがいね
 const FLAG_ROTATE_TERM = 180; // フラッグの回転のスパン
 
+// スライム画像
+let _SLIME = [];
+let slimeImages = [];
+
 // 表示のオフセット
 const OFFSET_X = 80;
 const OFFSET_Y = 80;
@@ -427,7 +431,11 @@ class Maze{
     // このあとプレイヤーとエネミーの表示。
     this.base.fill(128, 255, 128);
     const p = this.getDrawPos(this.player.position, offSet);
-    this.base.square(p.x - GRID * 0.3, p.y - GRID * 0.3, GRID * 0.6);
+    // ここをスライムの画像表示に書き換える
+    const imgId = getImgId(this.player.direction);
+    this.base.image(slimeImages[imgId], p.x - GRID * 0.5, p.y - GRID * 0.75, GRID, GRID,
+                    ((frameCount%32)/4|0) * 32, 0, 32, 32);
+    //this.base.square(p.x - GRID * 0.3, p.y - GRID * 0.3, GRID * 0.6);
 
     this.base.fill(255);
     for(let en of this.enemyArray){
@@ -439,6 +447,13 @@ class Maze{
     image(this.base, OFFSET_X, OFFSET_Y);
     //noLoop();
 	}
+}
+
+function getImgId(dir){
+  if(cos(dir) > 0.5){ return 0; }
+  else if(cos(dir) < -0.5){ return 2; }
+  else if(sin(dir) > 0.5){ return 1; }
+  return 3;
 }
 
 // 一般的な長方形のメイズデータ。
@@ -795,9 +810,16 @@ class Flag{
   }
 }
 
+function preload(){
+  for(let i = 0; i < 4; i++){
+    _SLIME.push(loadImage("https://inaridarkfox4231.github.io/assets/slime/slimes_" + i + ".png"));
+  }
+}
+
 function setup(){
 	createCanvas(800, 640); // 2Dでやる
   prepareFlagImage();
+  prepareSlimeImage();
 
 	const data = createMazeData_3();
 	master = new Maze();
@@ -831,6 +853,14 @@ function prepareFlagImage(){
     gr.textSize(GRID * 0.5);
     gr.text(texts[i], GRID * 0.25, GRID * 0.25);
     _IMAGES.push(gr);
+  }
+}
+
+function prepareSlimeImage(){
+  for(let i = 0; i < 4; i++){
+    let gr = createGraphics(GRID * 8, GRID);
+    gr.image(_SLIME[i], 0, 0);
+    slimeImages.push(gr);
   }
 }
 
