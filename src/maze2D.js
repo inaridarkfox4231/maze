@@ -416,6 +416,8 @@ class Maze{
     // プレイヤーの位置に応じてオフセット処理されたうえで描画される感じ
     const offSet = this.getOffSet(this.player.position);
     // image関数の使い方に注意してね
+    // ここで描画部分をいじってプレイヤーが存在するエリアの向こう側も描画するようにするんかな・・
+    // となると最大で4つくらいにわけることになりそう
     this.base.image(this.floorArray[currentFloorIndex], 0, 0, this.w, this.h, offSet.x, offSet.y, this.w, this.h);
     this.base.noStroke();
 
@@ -447,6 +449,10 @@ class Maze{
     image(this.base, OFFSET_X, OFFSET_Y);
     //noLoop();
 	}
+  clickAction(){
+    // クリックされたときの処理
+    this.player.jump();
+  }
 }
 
 function getImgId(dir){
@@ -659,12 +665,34 @@ class Player extends Wanderer{
     super();
     this.speed = 0.125; // 8フレームで1GRID移動する感じ。
     this.eventFlag = false;
+    this.jumpFlag = false;
+    this.jumpCount = 0;
   }
   setEventFlag(flag){
     this.eventFlag = flag;
   }
   getEventFlag(){
     return this.eventFlag;
+  }
+  jump(){
+    if(!this.jumpFlag){
+      this.jumpFlag = true;
+      this.jumpCount = GRID;
+    }
+  }
+  jumpAdjustment(){
+    if(this.jumpFlag){
+      const c = this.jumpCount;
+      const h = c * (GRID - c) * 4 / pow(GRID, 2);
+      this.position.y -= h;
+      this.jumpCount--;
+      if(this.jumpCount === 0){ this.jumpFlag = false; }
+    }
+  }
+  update(){
+    this.advance();
+    this.setPosition();
+    this.jumpAdjustment();
   }
   setDirection(pos){
     // posは画面内でのプレイヤーの位置(maze側から送る)
@@ -862,6 +890,10 @@ function prepareSlimeImage(){
     gr.image(_SLIME[i], 0, 0);
     slimeImages.push(gr);
   }
+}
+
+function mouseClicked(){
+  master.clickAction();
 }
 
 // とりあえずクリックで再生成できるようになってるけど暫定処理ね
