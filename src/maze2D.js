@@ -6,14 +6,23 @@ const FLAG_ROTATE_TERM = 180; // フラッグの回転のスパン
 let _SLIME = [];
 let slimeImages = [];
 
+// 迷路の基本サイズ
+const DISPLAY_WIDTH = 640;
+const DISPLAY_HEIGHT = 512;
+const GRID = 64; // グリッドサイズ
+const GRID_W = 10;
+const GRID_H = 8;
+
 // 表示のオフセット
 const OFFSET_X = 80;
-const OFFSET_Y = 80;
+const OFFSET_Y = 64;
 
-const DISPLAY_WIDTH = 640;
-const DISPLAY_HEIGHT = 480;
-const GRID_W = 20;
-const GRID_H = 15;
+// ジャンプ所要時間と高さ
+const JUMP_TIME = 32;
+const JUMP_HEIGHT = 64;
+
+// フラッグの大きさ
+const FRAG_SIZE = GRID * 0.75;
 
 // スタートとゴールと通常床（とワナ？？）
 const NORMAL = 0;
@@ -35,8 +44,6 @@ const FORWARD = 0; // 次の頂点が見つかりました。次のステップ�
 const AVOID = 1;   // 頂点は到達済みでした。別の頂点を探します。
 const BACK = 2;    // 次の頂点が見つからないので引き返します。
 const FINISH = 3;  // 木の作成が完了しました。
-
-const GRID = 32; // グリッドサイズ
 
 let master;
 
@@ -135,7 +142,7 @@ class Edge extends Component{
 // dataを元にまず頂点と辺が用意されて接続情報が登録されます。
 class Maze{
 	constructor(){
-    this.base = createGraphics(640, 480);
+    this.base = createGraphics(DISPLAY_WIDTH, DISPLAY_HEIGHT);
     // フロアの縦横の大きさを保持しといてオフセットの計算で使う
     this.w = 0;
     this.h = 0;
@@ -439,7 +446,7 @@ class Maze{
       fl.draw();
       if(fl.position.z === currentFloorIndex){
         const p = this.getDrawPos(fl.position, offSet);
-        this.base.image(fl.gr, p.x - GRID * 0.5, p.y - GRID * 0.5);
+        this.base.image(fl.gr, p.x - FRAG_SIZE * 0.5, p.y - FRAG_SIZE * 0.5);
       }
     }
 
@@ -449,7 +456,7 @@ class Maze{
     // ここをスライムの画像表示に書き換える
     const imgId = getImgId(this.player.direction);
     this.base.image(slimeImages[imgId], p.x - GRID * 0.5, p.y - GRID * 0.5 - this.player.getJumpHeight(), GRID, GRID,
-                    ((frameCount%32)/4|0) * 32, 0, 32, 32);
+                    ((frameCount%32)/4|0) * GRID, 0, GRID, GRID);
 
     this.base.fill(255);
     for(let en of this.enemyArray){
@@ -491,12 +498,12 @@ function getImgId(dir){
 // 中央のエリアのオフセット（描画位置の左上座標）が決まったら残りはそれをずらすだけなので楽ちん
 // 以上
 
-// 20x15をn枚用意する
+// GRID_W * GRID_Hをn枚用意する
 function createBaseMazeData(n){
   let data = {};
   data.vNum = 0;
-  const w = 20;
-  const h = 15;
+  const w = GRID_W;
+  const h = GRID_H;
   data.floorNum = n;
   data.x = [];
   data.y = [];
@@ -528,38 +535,41 @@ function createBaseMazeData(n){
 
 function mazeConnecting(data, connectingInfo){
   data.floorConnect = connectingInfo; // infoは個別にとっておいてエリアの構築で使う
-  const w = 20;
-  const h = 15;
+  const w = GRID_W;
+  const h = GRID_H;
   for(let i = 0; i < connectingInfo.length; i++){
+    const info = connectingInfo[i];
     // connectingInfoの各元はたとえば[0,1,4,5]みたいになっててどのフロアに通じるか書いてある
     // こっちの方がフロア番号が小さいか同じ場合だけ記述する（同じ場合は1回しか出てこないので）
     for(let dir = 0; dir < 4; dir++){
-      const k = connectingInfo[dir];
-      const q = k / 32 | 0;
-      k = k % 32; // 32で割った余りと商に分けるのは今後の課題(つなぎ方が変わる)
-      if(i > k){ continue; }
+      const k = info[dir];
+      if(k < 0){ continue; }
+      const q = k / 64 | 0;
+      const r = k % 64; // 64で割った余りと商に分けるのは今後の課題(つなぎ方が変わる)
+      if(i > r){ continue; }
       // dirで場合分け。
       // dirが0のときはiの右とkの左、dirが1のときはiの下とkの上、dirが2のときはiの左とkの右、dirが3のときはiの上とkの下を
       // つなげる
       switch(dir){
         case 0:
           for(let m = 0; m < h; m++){
-            data.connect.push({from:i * w * h + w - 1 + m * w, to:k * w * h + m * w, dir:0, separate:true});
+            cn0 = {from:i * w * h + w - 1 + m * w, to:r * w * h + m * w, dir:0, separate:true};
+            data.connect.push(cn0);
           }
           break;
         case 1:
           for(let m = 0; m < w; m++){
-            data.connect.push({from:(i + 1) * w * h - w + m, to:k * w * h + m, dir:1, separate:true});
+            data.connect.push({from:(i + 1) * w * h - w + m, to:r * w * h + m, dir:Math.PI/2, separate:true});
           }
           break;
         case 2:
           for(let m = 0; m < h; m++){
-            data.connect.push({from:i * w * h + m, to:k * w * h + w - 1 + m * w, dir:2, separate:true});
+            data.connect.push({from:i * w * h + m * w, to:r * w * h + w - 1 + m * w, dir:Math.PI, separate:true});
           }
           break;
         case 3:
           for(let m = 0; m < w; m++){
-            data.connect.push({from:i * w * h + m, to:(k + 1) * w * h - w + m, dir:3, separate:true});
+            data.connect.push({from:i * w * h + m, to:(r + 1) * w * h - w + m, dir:Math.PI*3/2, separate:true});
           }
           break;
       }
@@ -569,6 +579,16 @@ function mazeConnecting(data, connectingInfo){
 
 function createMazeData_0(){
   let data = createBaseMazeData(1);
+  return data;
+}
+
+function createMazeData_1(){
+  let data = createBaseMazeData(2);
+  //mazeConnecting(data, [[0,0,0,0]]);
+  mazeConnecting(data, [[1,1,1,-1], [0,-1,0,0]]); // 作った迷路を右にドッキング
+  // 上下左右調べてください
+  // それが終わったら迷路の数を増やしてみてください
+  // できたね
   return data;
 }
 
@@ -826,13 +846,13 @@ class Player extends Wanderer{
   jump(){
     if(!this.jumpFlag){
       this.jumpFlag = true;
-      this.jumpCount = GRID;
+      this.jumpCount = JUMP_TIME;
     }
   }
   jumpAdjustment(){
     if(this.jumpFlag){
       const c = this.jumpCount;
-      this.jumpHeight = c * (GRID - c) * 4 / GRID; // ジャンプの高さ（GRID考慮済み）
+      this.jumpHeight = c * (JUMP_TIME - c) * 4 * JUMP_HEIGHT / pow(JUMP_TIME, 2); // ジャンプの高さ（GRID考慮済み）
       this.jumpCount--;
       if(this.jumpCount === 0){
         this.jumpFlag = false;
@@ -960,7 +980,7 @@ class Enemy extends Wanderer{
 class Flag{
   constructor(_img){
     this.img = _img;
-    this.gr = createGraphics(GRID, GRID);
+    this.gr = createGraphics(FRAG_SIZE, FRAG_SIZE);
     this.gr.fill(128);
     this.gr.noStroke();
     this.durationCount = floor(random(FLAG_ROTATE_TERM));
@@ -982,12 +1002,12 @@ class Flag{
     if(this.durationCount === 0){ return; } // よくわからんけど0でエラーが生じてるので暫定処理
     const progress = this.durationCount / FLAG_ROTATE_TERM;
     this.gr.clear();
-    const x = GRID * 0.5 * (1 - abs(sin(progress * TAU)));
-    const l = GRID - 2 * x;
+    const x = FRAG_SIZE * 0.5 * (1 - abs(sin(progress * TAU)));
+    const l = FRAG_SIZE - 2 * x;
     if(progress < 0.5){
-      this.gr.image(this.img, x, 0, l, GRID, 0, 0, GRID, GRID);
+      this.gr.image(this.img, x, 0, l, FRAG_SIZE, 0, 0, FRAG_SIZE, FRAG_SIZE);
     }else{
-      this.gr.rect(x, 0, l, GRID);
+      this.gr.rect(x, 0, l, FRAG_SIZE);
     }
   }
 }
@@ -1003,7 +1023,7 @@ function setup(){
   prepareFlagImage();
   prepareSlimeImage();
 
-	const data = createMazeData_0();
+	const data = createMazeData_1();
 	master = new Maze();
   // 以下の処理はステージ開始時に行われるようにしていきたい・・
   // 同じ形式ならinitializeでいいけど迷路のスタイルを変える場合はふたたびデータ作ってprepareComponentsで
@@ -1024,16 +1044,16 @@ function draw(){
 function prepareFlagImage(){
   const texts = ["S", "1", "2", "3", "4", "5", "6", "7", "8", "9", "G"];
   for(let i = 0; i < 11; i++){
-    let gr = createGraphics(GRID, GRID);
+    let gr = createGraphics(FRAG_SIZE, FRAG_SIZE);
     gr.colorMode(HSB, 100);
     gr.noStroke();
     gr.background(220);
     gr.fill(i * 8, 100, 100);
-    gr.triangle(0, GRID, GRID, GRID, GRID, 0);
+    gr.triangle(0, FRAG_SIZE, FRAG_SIZE, FRAG_SIZE, FRAG_SIZE, 0);
     gr.fill(0);
     gr.textAlign(CENTER, CENTER);
-    gr.textSize(GRID * 0.5);
-    gr.text(texts[i], GRID * 0.25, GRID * 0.25);
+    gr.textSize(FRAG_SIZE * 0.5);
+    gr.text(texts[i], FRAG_SIZE * 0.25, FRAG_SIZE * 0.25);
     _IMAGES.push(gr);
   }
 }
