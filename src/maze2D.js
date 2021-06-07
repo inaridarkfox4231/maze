@@ -12,6 +12,8 @@ const OFFSET_Y = 80;
 
 const DISPLAY_WIDTH = 640;
 const DISPLAY_HEIGHT = 480;
+const GRID_W = 20;
+const GRID_H = 15;
 
 // スタートとゴールと通常床（とワナ？？）
 const NORMAL = 0;
@@ -139,7 +141,12 @@ class Maze{
     this.h = 0;
 		this.verticeArray = [];
 		this.edgeArray = [];
-    this.floorArray = []; // フロアグラフィックの集合（webglでフロア枚数分）
+    this.floorArray = []; // フロアグラフィックの集合（webglでフロア枚数分）// つまりこれを廃止・・
+    // this.areas = [];
+    // for(let i = 0; i < 20; i++){ this.areas.push(new Area()); } // 辺とかはここに描画（プレイヤーが足を踏み入れたら更新）
+    // this.playerArea = createGraphics(DISPLAY_WIDTH, DISPLAY_HEIGHT); // プレイヤーの存在するエリア
+    // this.playerAroundAreas = []; // プレイヤーの存在するエリアの上下左右
+    // for(let i = 0; i < 4; i++){ this.playerAroundAreas.push(createGraphics(DISPLAY_WIDTH, DISPLAY_HEIGHT)); }
 		this.start = undefined; // 最初の頂点を設定し、それよりvalueの大きな頂点で随時更新し続ける
 		this.goal = undefined; // valueの値を全部リセットしかつstartを起点としてサーチを進め、同じように更新し続ける感じ
 
@@ -187,9 +194,14 @@ class Maze{
     }
     // フロア枚数分だけ用意する感じ。描画の時にオフセットを考慮して描画する。プレイヤーも。
     // キャンバス上のプレイヤーの位置とマウス位置で移動についての情報が決まる感じ。
+
+    // ここはなくなる・・というかフロアの枚数分初期化する？ああでもstrokeを64に戻す必要があるか。
+    // 完成してから255にすると。それ以外特にやることないかも。
+    // あ、そうか、エリアの接続状況をここで登録しておかないと。
+    // 接続の具合から自動的に辺の接続が行われるメソッドも作らないと（いろいろ大変・・・）
     this.floorArray = [];
-    this.w = data.w * GRID;
-    this.h = data.h * GRID;
+    this.w = GRID_W * GRID;
+    this.h = GRID_H * GRID;
     for(let i = 0; i < data.floorNum; i++){
       let gr = createGraphics(this.w, this.h);
       gr.stroke(64); // 通ったところは白で
@@ -401,7 +413,8 @@ class Maze{
   }
   getOffSet(p){
     // pをプレイヤーのグローバルな位置としたときの画像の貼り付けの左上座標。
-    return {x:constrain(p.x * GRID - 320, 0, this.w - 640), y:constrain(p.y * GRID - 240, 0, this.h - 480)};
+    return {x:constrain(p.x * GRID - DISPLAY_WIDTH * 0.5, 0, this.w - DISPLAY_WIDTH),
+            y:constrain(p.y * GRID - DISPLAY_HEIGHT * 0.5, 0, this.h - DISPLAY_HEIGHT)};
   }
   getDrawPos(p, offSet){
     // 画面に表示される位置の計算。
@@ -435,9 +448,8 @@ class Maze{
     const p = this.getDrawPos(this.player.position, offSet);
     // ここをスライムの画像表示に書き換える
     const imgId = getImgId(this.player.direction);
-    this.base.image(slimeImages[imgId], p.x - GRID * 0.5, p.y - GRID * 0.75, GRID, GRID,
+    this.base.image(slimeImages[imgId], p.x - GRID * 0.5, p.y - GRID * 0.5 - this.player.getJumpHeight(), GRID, GRID,
                     ((frameCount%32)/4|0) * 32, 0, 32, 32);
-    //this.base.square(p.x - GRID * 0.3, p.y - GRID * 0.3, GRID * 0.6);
 
     this.base.fill(255);
     for(let en of this.enemyArray){
@@ -462,11 +474,111 @@ function getImgId(dir){
   return 3;
 }
 
+// 雑に修正案
+// まずフロアを何枚か用意させる関数、20x15を何枚か、それを用意して、
+// 接続は[[],[],...]って感じで長さ4の配列を用意、
+// それに応じて接続を与えるメソッドを用意して完成
+// dataにもそれを含めておいてareaの構成で使う
+// 16や32や48を足せば反転を表現できるよおわり
+
+// ついでにオフセットについて
+// もう遅いので手短に
+// まず存在するフロアについて
+// その左側がある場合プレイヤーが中央より左なら中心、
+// その右側がある場合プレイヤーが中央より右なら中心とする。
+// 左側がなくて中央より左なら画面全体ぴったり
+// 右側がなくて中央より右なら画面全体ぴったり
+// 中央のエリアのオフセット（描画位置の左上座標）が決まったら残りはそれをずらすだけなので楽ちん
+// 以上
+
+// 20x15をn枚用意する
+function createBaseMazeData(n){
+  let data = {};
+  data.vNum = 0;
+  const w = 20;
+  const h = 15;
+  data.floorNum = n;
+  data.x = [];
+  data.y = [];
+  data.z = [];
+  data.connect = []; // インデックスは頂点番号、from:始点、to:終点、dir:辺の出ている方向、separate:フロアまたぎならtrue
+  // これはベースデータなのですべてfalse
+  // 番号は各フロアについて一番上「左→右」で以下1段ずつ降りていく
+  // 終わったら次のフロア
+  for(let i = 0; i < n; i++){
+    for(let k = 0; k < h; k++){
+      for(let m = 0; m < w; m++){
+        data.x.push(0.5 + m);
+        data.y.push(0.5 + k);
+        data.z.push(i);
+        data.vNum++;
+        const index = i * w * h + w * k + m;
+        if(m < w - 1){
+          // separateはすべてfalse. フロアまたぎや同じ迷路でのループはtrueになるがそれは個別に指定する。
+          data.connect.push({from:index, to:index + 1, dir:0, separate:false});
+        }
+        if(k < h - 1){
+          data.connect.push({from:index, to:index + w, dir:Math.PI * 0.5, separate:false});
+        }
+      }
+    }
+  }
+  return data;
+}
+
+function mazeConnecting(data, connectingInfo){
+  data.floorConnect = connectingInfo; // infoは個別にとっておいてエリアの構築で使う
+  const w = 20;
+  const h = 15;
+  for(let i = 0; i < connectingInfo.length; i++){
+    // connectingInfoの各元はたとえば[0,1,4,5]みたいになっててどのフロアに通じるか書いてある
+    // こっちの方がフロア番号が小さいか同じ場合だけ記述する（同じ場合は1回しか出てこないので）
+    for(let dir = 0; dir < 4; dir++){
+      const k = connectingInfo[dir];
+      const q = k / 32 | 0;
+      k = k % 32; // 32で割った余りと商に分けるのは今後の課題(つなぎ方が変わる)
+      if(i > k){ continue; }
+      // dirで場合分け。
+      // dirが0のときはiの右とkの左、dirが1のときはiの下とkの上、dirが2のときはiの左とkの右、dirが3のときはiの上とkの下を
+      // つなげる
+      switch(dir){
+        case 0:
+          for(let m = 0; m < h; m++){
+            data.connect.push({from:i * w * h + w - 1 + m * w, to:k * w * h + m * w, dir:0, separate:true});
+          }
+          break;
+        case 1:
+          for(let m = 0; m < w; m++){
+            data.connect.push({from:(i + 1) * w * h - w + m, to:k * w * h + m, dir:1, separate:true});
+          }
+          break;
+        case 2:
+          for(let m = 0; m < h; m++){
+            data.connect.push({from:i * w * h + m, to:k * w * h + w - 1 + m * w, dir:2, separate:true});
+          }
+          break;
+        case 3:
+          for(let m = 0; m < w; m++){
+            data.connect.push({from:i * w * h + m, to:(k + 1) * w * h - w + m, dir:3, separate:true});
+          }
+          break;
+      }
+    }
+  }
+}
+
+function createMazeData_0(){
+  let data = createBaseMazeData(1);
+  return data;
+}
+
 // 一般的な長方形のメイズデータ。
 // 同じ長方形をn枚用意する感じ
 // グリッドサイズはとりあえず考えない。w*GRIDとh*GRIDがキャンバスサイズになり、すべての座標値はGRID倍されて実際の値になる。
 // ほかにもひし形とかそういうの作っても面白そう
 // 正方形6枚用意して立方体とか、ひし形10枚で正二十面体とか？面白そう。しないけど。三角形4枚とか面白そう。ひし形2枚？方向調整出来ればね。
+
+/*
 function createRectMazeData(w, h, n){
   let data = {};
   data.vNum = 0;
@@ -507,6 +619,7 @@ function createRectMazeData(w, h, n){
   }
   return data;
 }
+*/
 
 // ひし形、三角形、八角形と正方形の組み合わせ、くらいは考えてる。
 // あと六角形も。もうハニカムでいいと思う。難しく考えないで。
@@ -514,6 +627,8 @@ function createRectMazeData(w, h, n){
 // たとえばこうする
 // 複数の場合はmultiっていう別のテンプレート用意するといい。2つでも4つでも。(createMultiRectMazeDataとかする)
 // んで取得してからconnectをいじって辺をつなぐなどする
+
+/*
 function createMazeData_0(){
   let data = createRectMazeData(20, 15, 1);
   return data;
@@ -576,6 +691,8 @@ function createMazeData_4(){
   data.connect.push(...info);
   return data;
 }
+*/
+
 // 作ってて思ったけどこれあれだね・・全体像見えなくてもなんとなくゴール到着出来ちゃうね・・うん。
 // となると周囲を暗くして見えなくしても問題ない？ってわけでもなさそうだけど。んー。
 // ここまでくると迷路自体はもはや単なるフィールドでしかないので、敵作ったりしないことには発展しないわね。
@@ -583,6 +700,37 @@ function createMazeData_4(){
 // 分かれ道でどっちに進んだか覚えておかないと確実に迷う
 // 厳しい・・まあそれはおいといて敵出したいわね。で、マウスダウンでdirectionの方向に発射すると。倒すと。
 // 倒すとなんか落とす。触るとゲット。時間経過で消滅。敵は減ると現れる。そんな感じ？そんな多くないので衝突判定も適当でOK.
+
+// 単位
+// maze本体に・・20個くらい持たせる（暫定）
+// 迷路作成の際にそれらにclearして辺を描画
+// 薄い色で
+// プレイヤーが訪れたら白で新しく塗り替える
+// これを使って・・
+// うん。2枚用意する
+// 片方は今までfloorArrayでやってたやつ（辺とか描いてある）
+// もう片方はそこからコピーして使うやつ
+// 最後にこれを適当に組み合わせてメインの640x480を構成する流れ
+// だから従来の頂点とか辺とかそこらへんは一緒だけど
+// そこから先を変える感じ
+// 今までは一つのフロアしか扱わなかった
+// これからは毎フレームプレイヤーの存在するフロアの上下左右すべて使うことになる感じ・・
+// あーなるほどどうするか・・ん－
+// じゃあメイン側にも・・全部で5枚くらい用意？
+// というかmainGrが要らないのか
+// mainGr要らない？？？？？
+// 上下左右含めて5つのグラフィックをあらかじめ用意しておいて、
+// プレイヤーのいるフロアのあれを描画して（プレイヤー自身が反転フロアにいる場合を考慮してphaseとかいう変数作って）
+// 最終的にはそれも考慮するけど・・（反転に対しても上下左右用意する必要はない、あくまで相対的にどうかみたいな）
+// 反転描画は位置だけ反転させて普通におけばいい
+
+class Area{
+  constructor(id){
+    this.id = id;
+    this.base = createGraphics(DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    this.connected = new Array(4); // ここにdata.floorConnectの情報を格納する感じ
+  }
+}
 
 // うごめくもの
 // まあ、敵とアイテム、かなぁ
@@ -666,6 +814,7 @@ class Player extends Wanderer{
     this.speed = 0.125; // 8フレームで1GRID移動する感じ。
     this.eventFlag = false;
     this.jumpFlag = false;
+    this.jumpHeight = 0;
     this.jumpCount = 0;
   }
   setEventFlag(flag){
@@ -683,11 +832,16 @@ class Player extends Wanderer{
   jumpAdjustment(){
     if(this.jumpFlag){
       const c = this.jumpCount;
-      const h = c * (GRID - c) * 4 / pow(GRID, 2);
-      this.position.y -= h;
+      this.jumpHeight = c * (GRID - c) * 4 / GRID; // ジャンプの高さ（GRID考慮済み）
       this.jumpCount--;
-      if(this.jumpCount === 0){ this.jumpFlag = false; }
+      if(this.jumpCount === 0){
+        this.jumpFlag = false;
+        this.jumpHeight = 0;
+      }
     }
+  }
+  getJumpHeight(){
+    return this.jumpHeight;
   }
   update(){
     this.advance();
@@ -849,7 +1003,7 @@ function setup(){
   prepareFlagImage();
   prepareSlimeImage();
 
-	const data = createMazeData_3();
+	const data = createMazeData_0();
 	master = new Maze();
   // 以下の処理はステージ開始時に行われるようにしていきたい・・
   // 同じ形式ならinitializeでいいけど迷路のスタイルを変える場合はふたたびデータ作ってprepareComponentsで
