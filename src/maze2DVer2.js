@@ -12,6 +12,7 @@ const DISPLAY_HEIGHT = 512;
 const GRID = 64; // グリッドサイズ
 const GRID_W = 10;
 const GRID_H = 8;
+const FLOOR_CAPACITY = 20;
 
 // 表示のオフセット
 const OFFSET_X = 80;
@@ -148,12 +149,25 @@ class Maze{
     this.h = 0;
 		this.verticeArray = [];
 		this.edgeArray = [];
-    this.floorArray = []; // フロアグラフィックの集合（webglでフロア枚数分）// つまりこれを廃止・・
-    // this.areas = [];
-    // for(let i = 0; i < 20; i++){ this.areas.push(new Area()); } // 辺とかはここに描画（プレイヤーが足を踏み入れたら更新）
-    // this.playerArea = createGraphics(DISPLAY_WIDTH, DISPLAY_HEIGHT); // プレイヤーの存在するエリア
-    // this.playerAroundAreas = []; // プレイヤーの存在するエリアの上下左右
-    // for(let i = 0; i < 4; i++){ this.playerAroundAreas.push(createGraphics(DISPLAY_WIDTH, DISPLAY_HEIGHT)); }
+
+    //this.floorArray = []; // フロアグラフィックの集合（webglでフロア枚数分）// つまりこれを廃止・・
+    this.areas = [];
+    this.floorNum = 0; // フロアの個数（可変なのでプロパティにしないと）
+    // 辺とかはここに描画（プレイヤーが足を踏み入れたら更新）
+    for(let i = 0; i < FLOOR_CAPACITY; i++){
+      let _area = new Area();
+      _area.setFloorId(i);
+      this.areas.push(_area);
+    }
+    // プレイヤーの存在するエリア
+    this.playerArea = new Area();
+    // プレイヤーの存在するエリアの上下左右
+    this.playerAroundAreas = [];
+    for(let i = 0; i < 4; i++){
+      let _area = new Area();
+      this.playerAroundAreas.push(_area);
+    }
+
 		this.start = undefined; // 最初の頂点を設定し、それよりvalueの大きな頂点で随時更新し続ける
 		this.goal = undefined; // valueの値を全部リセットしかつstartを起点としてサーチを進め、同じように更新し続ける感じ
 
@@ -209,15 +223,21 @@ class Maze{
 
     // ここは廃止されて
     // フロアの枚数分だけareasの成分を初期化する処理になります
-    this.floorArray = [];
-    this.w = GRID_W * GRID; // これDISPLAY_WIDTH・・なのでthis.wやthis.hは廃止されます。
-    this.h = GRID_H * GRID;
-    for(let i = 0; i < data.floorNum; i++){
-      let gr = createGraphics(this.w, this.h);
-      gr.stroke(64); // 通ったところは白で
-      gr.strokeWeight(GRID * 0.1);
-      this.floorArray.push(gr);
+    //this.floorArray = [];
+    this.floorNum = data.floorNum;
+    //this.w = GRID_W * GRID; // これDISPLAY_WIDTH・・なのでthis.wやthis.hは廃止されます。
+    //this.h = GRID_H * GRID;
+    for(let i = 0; i < this.floorNum; i++){
+      //let gr = createGraphics(this.w, this.h);
+      let _area = this.areas[i];
+      _area.setConnected(data.floorConnect[i]);
+      _area.initialize();
+      //this.floorArray.push(gr);
     }
+    // 毎フレームクリアするのでここでは必要ないかも。あとその際にフロア番号を、
+    // プレイヤーの存在するフロアに該当するフロアのコネクト情報から取得してそれで設定しますね
+    //this.playerArea.initialize();
+    //for(let _area of this.playerAroundAreas){ _area.initialize(); }
 	}
 	initialize(seed = -1){
 		// 状態の初期化と起点の設定
@@ -381,21 +401,23 @@ class Maze{
     for(let fg of this.floorArray){ fg.stroke(255); }
   }
   drawEdge(e){
-    const L = GRID * 0.5;
+    //const L = GRID * 0.5;
     const v0 = e.getCmp(0).position;
     const v1 = e.getCmp(1).position;
     const dir0 = e.getDir(0);
     const dir1 = e.getDir(1);
     const z0 = int(v0.z);
     const z1 = int(v1.z);
+    let gr0 = this.areas[z0].getBase();
+    let gr1 = this.areas[z1].getBase();
     // z0とz1はフロアナンバー、つまりthis.areasの成分のインデックスなので、
     // ここは各々のareaに描画する処理になる。
-    // 線ははみ出してもいいのでL*0.5なんていう小細工はしなくていいです。単純にGRIDの長さだけ描画してください
+    // 線ははみ出してもいいので（切れるので）GRID*0.5なんていう小細工はしなくていいです。単純にGRIDの長さだけ描画してください
     if(!e.separate){
-      this.floorArray[z0].line(v0.x * GRID, v0.y * GRID, v1.x * GRID, v1.y * GRID);
+      gr0.line(v0.x * GRID, v0.y * GRID, v1.x * GRID, v1.y * GRID);
     }else{
-      this.floorArray[z0].line(v0.x * GRID, v0.y * GRID, v0.x * GRID + L * cos(dir0), v0.y * GRID + L * sin(dir0));
-      this.floorArray[z1].line(v1.x * GRID, v1.y * GRID, v1.x * GRID + L * cos(dir1), v1.y * GRID + L * sin(dir1));
+      gr0.line(v0.x * GRID, v0.y * GRID, v0.x * GRID + GRID * cos(dir0), v0.y * GRID + GRID * sin(dir0));
+      gr1.line(v1.x * GRID, v1.y * GRID, v1.x * GRID + GRID * cos(dir1), v1.y * GRID + GRID * sin(dir1));
     }
   }
   update(){
@@ -435,9 +457,41 @@ class Maze{
     return {x:p.x * GRID - offSet.x, y:p.y * GRID - offSet.y};
   }
 	draw(){
+    // ここで全体の背景を設定します（とりあえずグレー）
     background(220);
+
+    // プレイヤーの存在するフロアを調べる
     const currentFloorIndex = this.player.position.z;
-    this.base.background(0);
+    const info = this.areas[currentFloorIndex].getConnected();
+    // infoの0,1,2,3に隣接するフロアの情報が入ってる
+
+    // とりあえずfloorIdを設定
+    // さらに描画に使うグラフィックを複数枚用意して配列にぶちこんで（1～5枚）
+    // 順繰りにplayerやenemyに渡して描画してもらう処理
+    // こうしてワンクッション置くことにより面倒なオフセットの計算はなくなる！
+    let usingGr = [];
+    usingGr.push(this.playerArea.getBase());
+    this.playerArea.setFloorId(currentFloorIndex);
+    for(let i = 0; i < 4; i++){
+      const floorId = info[i] % FLOOR_CAPACITY;
+      const phaseId = info[i] / FLOOR_CAPACITY | 0;
+      let _area = this.playerAroundAreas[i];
+      _area.setFloorId(floorId); // 描画しないとこには-1が設定されその情報はあとで使う
+      if(floorId >= 0){ usingGr.push(_area.getBase()); }
+      // setPhaseIdもそのうち
+    }
+
+    // usingGr準備完了
+    // プレイヤーの描画
+    // エネミーの描画
+    // フラッグの描画
+    // this.base.background(0);
+    // プレイヤーのオフセット及びinfoの内容からplayerAreaの描画の際のオフセットを計算
+    // それをもとにアラウンドを描画
+    // 完成！
+
+    this.base.background(0); // あとで
+
     // ゆくゆくはプレイヤーの存在するフロアに応じたグラフィックが呼び出されて
     // プレイヤーの位置に応じてオフセット処理されたうえで描画される感じ
     const offSet = this.getOffSet(this.player.position);
@@ -550,8 +604,8 @@ function mazeConnecting(data, connectingInfo){
     for(let dir = 0; dir < 4; dir++){
       const k = info[dir];
       if(k < 0){ continue; }
-      const q = k / 64 | 0;
-      const r = k % 64; // 64で割った余りと商に分けるのは今後の課題(つなぎ方が変わる)
+      const q = k / FLOOR_CAPACITY | 0;
+      const r = k % FLOOR_CAPACITY; // 64で割った余りと商に分けるのは今後の課題(つなぎ方が変わる)
       if(i > r){ continue; }
       // dirで場合分け。
       // dirが0のときはiの右とkの左、dirが1のときはiの下とkの上、dirが2のときはiの左とkの右、dirが3のときはiの上とkの下を
@@ -778,8 +832,11 @@ class Area{
   getBase(){
     return this.base;
   }
-  clear(){
-    this.base.clear();
+  initialize(){
+    let gr = this.base;
+    gr.clear();
+    gr.stroke(64); // 通ったところは白で
+    gr.strokeWeight(GRID * 0.1);
   }
 }
 
@@ -805,9 +862,11 @@ class Wanderer{
     this.setEdge(edg);
     // directionの初期値がないとまずいね（playerはマウスで決めるが任意移動には使えないので）
     if(v.getIndex() === edg.getCmp(0).getIndex()){
-      this.progress = 0; this.direction = edg.getDir(0);
+      this.progress = 0;
+      this.direction = edg.getDir(0);
     }else{
-      this.progress = 1; this.direction = edg.getDir(1);
+      this.progress = 1;
+      this.direction = edg.getDir(1);
     }
   }
   setEdge(e){
@@ -853,6 +912,22 @@ class Wanderer{
         dir = this.currentEdge.getDir(1);
         this.position.set(this.to.x + (1 - this.progress) * cos(dir), this.to.y + (1 - this.progress) * sin(dir), this.to.z);
       }
+    }
+  }
+  draw(grs){
+    // grsのそれぞれについてフロア番号を調べて
+    // オブジェクトが存在する辺の両端の頂点を調べて
+    // 一致する場合にその頂点と存在する辺の情報に基づいて1個ないし2個描画する
+    // さて問題はsetPosition要らねーんじゃ・・？ってとこ
+    // だってseparate===trueのときの計算結果、これ両方使うので・・
+
+    // 画像は全部同じ仕様にする（64x64を4行8列にして全方向）
+    // その方が楽
+    // 今現在四角形にしてるエネミーも画像用意していろいろいじるつもり
+    // 場合によって切り替える場合でも配列から取り出してその都度当てはめるようにすればメソッドは同じものが使える
+    for(let gr of grs){
+      const id = gr.getFloorId();
+      /* 帰ったらやる */
     }
   }
 }
