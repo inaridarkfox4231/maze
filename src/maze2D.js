@@ -206,8 +206,11 @@ class Maze{
     // 完成してから255にすると。それ以外特にやることないかも。
     // あ、そうか、エリアの接続状況をここで登録しておかないと。
     // 接続の具合から自動的に辺の接続が行われるメソッドも作らないと（いろいろ大変・・・）
+
+    // ここは廃止されて
+    // フロアの枚数分だけareasの成分を初期化する処理になります
     this.floorArray = [];
-    this.w = GRID_W * GRID;
+    this.w = GRID_W * GRID; // これDISPLAY_WIDTH・・なのでthis.wやthis.hは廃止されます。
     this.h = GRID_H * GRID;
     for(let i = 0; i < data.floorNum; i++){
       let gr = createGraphics(this.w, this.h);
@@ -385,6 +388,9 @@ class Maze{
     const dir1 = e.getDir(1);
     const z0 = int(v0.z);
     const z1 = int(v1.z);
+    // z0とz1はフロアナンバー、つまりthis.areasの成分のインデックスなので、
+    // ここは各々のareaに描画する処理になる。
+    // 線ははみ出してもいいのでL*0.5なんていう小細工はしなくていいです。単純にGRIDの長さだけ描画してください
     if(!e.separate){
       this.floorArray[z0].line(v0.x * GRID, v0.y * GRID, v1.x * GRID, v1.y * GRID);
     }else{
