@@ -1,10 +1,14 @@
-
-let _IMAGES = []; // とりあえずスタートとゴールとポイントの画像11個からなる配列おねがいね
-const FLAG_ROTATE_TERM = 180; // フラッグの回転のスパン
+// New Maze.
 
 // スライム画像
 let _SLIME = [];
-let slimeImages = [];
+let slimeImages;
+// 敵画像・・暫定的にスライムの色違い
+let _ENEMY = [];
+let enemyImagesArray = [];
+// フラッグ画像など
+let flagImages = []; // とりあえずスタートとゴールとポイントの画像11個からなる配列おねがいね
+const FLAG_ROTATE_TERM = 120; // フラッグの回転のスパン
 
 // 迷路の基本サイズ
 const DISPLAY_WIDTH = 640;
@@ -22,8 +26,11 @@ const OFFSET_Y = 64;
 const JUMP_TIME = 32;
 const JUMP_HEIGHT = 64;
 
+// アニメーション切り替わりスパン
+const ANIMATION_SPAN = 4;
+
 // フラッグの大きさ
-const FRAG_SIZE = GRID * 0.75;
+const FLAG_SIZE = GRID * 0.75;
 
 // スタートとゴールと通常床（とワナ？？）
 const NORMAL = 0;
@@ -167,19 +174,20 @@ class Maze{
       let _area = new Area();
       this.playerAroundAreas.push(_area);
     }
+    this.playerAreaOffSet = createVector(0, 0); // プレイヤーエリアのオフセットはupdateで計算してマウス操作に使う
 
 		this.start = undefined; // 最初の頂点を設定し、それよりvalueの大きな頂点で随時更新し続ける
 		this.goal = undefined; // valueの値を全部リセットしかつstartを起点としてサーチを進め、同じように更新し続ける感じ
 
     this.flags = []; // フラッグたち
     for(let i = 0; i < 11; i++){
-      this.flags.push(new Flag(_IMAGES[i]));
+      this.flags.push(new Flag(flagImages[i]));
     }
 
     this.player = new Player(); // player動かすのもいろいろ考えないとね・・
     this.enemyArray = [];
     for(let i = 0; i < 5; i++){
-      this.enemyArray.push(new Enemy());
+      this.enemyArray.push(new Enemy(0));
     }
 	}
 	prepareComponents(data){
@@ -230,7 +238,7 @@ class Maze{
     for(let i = 0; i < this.floorNum; i++){
       //let gr = createGraphics(this.w, this.h);
       let _area = this.areas[i];
-      _area.setConnected(data.floorConnect[i]);
+      _area.setConnected(data.floorConnect[i]); // コネクト情報の登録
       _area.initialize();
       //this.floorArray.push(gr);
     }
@@ -398,7 +406,9 @@ class Maze{
       if(e.getState() === IS_NOT_PASSABLE){ continue; }
       this.drawEdge(e); // 辺描画をメソッド化
     }
-    for(let fg of this.floorArray){ fg.stroke(255); }
+    for(let _area of this.areas){
+      _area.getBase().stroke(255);
+    }
   }
   drawEdge(e){
     //const L = GRID * 0.5;
@@ -420,10 +430,24 @@ class Maze{
       gr1.line(v1.x * GRID, v1.y * GRID, v1.x * GRID + GRID * cos(dir1), v1.y * GRID + GRID * sin(dir1));
     }
   }
+  calcPlayerAreaOffSet(){
+    // プレイヤーの存在するフロアを調べる
+    const info = this.areas[this.player.position.z].getConnected();
+    const px = this.player.position.x;
+    const py = this.player.position.y;
+    const critX = (px > DISPLAY_WIDTH * 0.5);
+    const critY = (py > DISPLAY_HEIGHT * 0.5);
+    // playerAreaOffSetXは中央より右で右に何かある→半分-px,ない→0
+    // 中央より左で左に何かある→半分-px,ない→0
+    this.playerAreaOffSet.set(((critX && info[0] >= 0) || (!critX && info[2] >= 0) ? DISPLAY_WIDTH * 0.5 - px : 0),
+                              ((critY && info[1] >= 0) || (!critY && info[3] >= 0) ? DISPLAY_HEIGHT * 0.5 - py : 0));
+    // これにプレイヤーの位置を足すと画面内での位置が出る感じ
+  }
   update(){
-    const pos = this.getDrawPos(this.player.position);
-    this.player.setDirection(pos);
+    this.calcPlayerAreaOffSet();
+    this.player.setDirection(this.playerAreaOffSet);
     this.player.update();
+    this.player.jumpAdjustment();
     this.eventCheck(); // イベントフラグがONならイベントを実行してフラグを折る
 
     for(let fl of this.flags){ fl.update(); }
@@ -469,17 +493,35 @@ class Maze{
     // さらに描画に使うグラフィックを複数枚用意して配列にぶちこんで（1～5枚）
     // 順繰りにplayerやenemyに渡して描画してもらう処理
     // こうしてワンクッション置くことにより面倒なオフセットの計算はなくなる！
-    let usingGr = [];
-    usingGr.push(this.playerArea.getBase());
+
+    // あーそうか、getFloorIdするにはareaを直接ぶちこまないといけないんだ
+    let usingAreas = [];
     this.playerArea.setFloorId(currentFloorIndex);
+    this.playerArea.setMaze(this.areas[currentFloorIndex]);
+    usingAreas.push(this.playerArea);
     for(let i = 0; i < 4; i++){
       const floorId = info[i] % FLOOR_CAPACITY;
       const phaseId = info[i] / FLOOR_CAPACITY | 0;
       let _area = this.playerAroundAreas[i];
-      _area.setFloorId(floorId); // 描画しないとこには-1が設定されその情報はあとで使う
-      if(floorId >= 0){ usingGr.push(_area.getBase()); }
+      if(floorId >= 0){
+        _area.setFloorId(floorId); // 描画しないとこには-1が設定されその情報はあとで使う
+        _area.setMaze(this.areas[floorId]);
+        usingAreas.push(_area);
+      }
       // setPhaseIdもそのうち
     }
+
+    this.player.draw(usingAreas);
+    for(let _enemy of this.enemyArray){
+      _enemy.draw(usingAreas);
+    }
+    for(let _flag of this.flags){
+      _flag.draw(usingAreas);
+    }
+    // フラッグはめんどうなまたぎとかないから普通にdrawメソッド用意するだけ
+    // あとで準備する
+    // 画像もプロパティ化して用意する
+    // もろもろ終わったら最後の仕上げ、プレイヤーの存在するフロアをもとにパッチワーク
 
     // usingGr準備完了
     // プレイヤーの描画
@@ -491,39 +533,57 @@ class Maze{
     // 完成！
 
     this.base.background(0); // あとで
+    this.base.image(this.playerArea.getBase(), this.playerAreaOffSet.x, this.playerAreaOffSet.y);
+    // こっから先は泥臭くやればいいんだよ
+    // っていいつつ配列で書いちゃう
+    for(let i = 0; i < 4; i++){
+      if(info[i] >= 0){
+        this.base.image(this.playerAroundAreas[i].getBase(),
+                        this.playerAreaOffSet.x + DISPLAY_WIDTH * cos(TAU * i / 4),
+                        this.playerAreaOffSet.y + DISPLAY_HEIGHT * sin(TAU * i / 4));
+      }
+    }
 
     // ゆくゆくはプレイヤーの存在するフロアに応じたグラフィックが呼び出されて
     // プレイヤーの位置に応じてオフセット処理されたうえで描画される感じ
+    /*
     const offSet = this.getOffSet(this.player.position);
     // image関数の使い方に注意してね
     // ここで描画部分をいじってプレイヤーが存在するエリアの向こう側も描画するようにするんかな・・
     // となると最大で4つくらいにわけることになりそう
     this.base.image(this.floorArray[currentFloorIndex], 0, 0, this.w, this.h, offSet.x, offSet.y, this.w, this.h);
     this.base.noStroke();
+    */
 
     // 描画に関してはそのうちbaseを渡してそこに描くようにしたいけど・・
+    /*
     for(let fl of this.flags){
       fl.draw();
       if(fl.position.z === currentFloorIndex){
         const p = this.getDrawPos(fl.position, offSet);
-        this.base.image(fl.gr, p.x - FRAG_SIZE * 0.5, p.y - FRAG_SIZE * 0.5);
+        this.base.image(fl.gr, p.x - FLAG_SIZE * 0.5, p.y - FLAG_SIZE * 0.5);
       }
     }
+    */
 
     // このあとプレイヤーとエネミーの表示。
+    /*
     this.base.fill(128, 255, 128);
     const p = this.getDrawPos(this.player.position, offSet);
     // ここをスライムの画像表示に書き換える
     const imgId = getImgId(this.player.direction);
     this.base.image(slimeImages[imgId], p.x - GRID * 0.5, p.y - GRID * 0.5 - this.player.getJumpHeight(), GRID, GRID,
                     ((frameCount%32)/4|0) * GRID, 0, GRID, GRID);
+    */
 
+    /*
     this.base.fill(255);
     for(let en of this.enemyArray){
       if(en.position.z !== currentFloorIndex){ continue; } // ごめんなさい違うフロアにいるときも描画してました。。
       const q = this.getDrawPos(en.position, offSet);
       this.base.square(q.x - GRID * 0.4, q.y - GRID * 0.4, GRID * 0.8);
     }
+    */
 
     image(this.base, OFFSET_X, OFFSET_Y);
     //noLoop();
@@ -532,13 +592,6 @@ class Maze{
     // クリックされたときの処理
     this.player.jump();
   }
-}
-
-function getImgId(dir){
-  if(cos(dir) > 0.5){ return 0; }
-  else if(cos(dir) < -0.5){ return 2; }
-  else if(sin(dir) > 0.5){ return 1; }
-  return 3;
 }
 
 // 雑に修正案
@@ -645,7 +698,7 @@ function createMazeData_0(){
 function createMazeData_1(){
   let data = createBaseMazeData(2);
   //mazeConnecting(data, [[0,0,0,0]]);
-  mazeConnecting(data, [[1,1,1,-1], [0,-1,0,0]]); // 作った迷路を右にドッキング
+  mazeConnecting(data, [[1,1,1,1], [0,0,0,0]]); // 作った迷路を右にドッキング
   // 上下左右調べてください
   // それが終わったら迷路の数を増やしてみてください
   // できたね
@@ -838,6 +891,11 @@ class Area{
     gr.stroke(64); // 通ったところは白で
     gr.strokeWeight(GRID * 0.1);
   }
+  setMaze(_area){
+    let gr = this.base;
+    gr.clear();
+    gr.image(_area.getBase(), 0, 0);
+  }
 }
 
 // うごめくもの
@@ -855,6 +913,9 @@ class Wanderer{
     this.direction = 0;
     this.lastVertice = undefined; // 最後に訪れた頂点。edgeの乗り換えの際に更新される感じ。
     this.speed = 0; // いろいろ。
+    this.img = createGraphics(GRID, GRID);
+    this.imgs = undefined;
+    this.durationCount = 0;
   }
   setting(v){
     const candidate = v.connected.filter((e) => { return e.cmp.state === IS_PASSABLE });
@@ -868,6 +929,10 @@ class Wanderer{
       this.progress = 1;
       this.direction = edg.getDir(1);
     }
+    this.durationCount = 0;
+  }
+  setImgs(_imgs){
+    this.imgs = _imgs;
   }
   setEdge(e){
     this.currentEdge = e;
@@ -894,11 +959,23 @@ class Wanderer{
   update(){
     this.advance();
     this.setPosition();
+    this.setImg();
+    this.durationCount++;
+    this.durationCount = this.durationCount % (8 * ANIMATION_SPAN);
   }
   advance(){}
   operation(){}
   setPosition(){
     // separate辺の場合はz座標についてあれこれする
+    // separateは無視
+    // 単純にfromを使って位置を決める
+    // その場合progressによってプレイヤーが本来の場所からはみ出してしまう場合があるのだけど
+    // その場合でも普通に表示はなされる
+    // あとでseparateの場合にtoを追加すれば矛盾は生じない
+    const dir = this.currentEdge.getDir(0);
+    this.position.set((this.from.x + this.progress * cos(dir)) * GRID,
+                      (this.from.y + this.progress * sin(dir)) * GRID, this.from.z);
+    /*
     if(!this.currentEdge.separate){
       this.position.set(this.from.x * (1 - this.progress) + this.to.x * this.progress,
                       this.from.y * (1 - this.progress) + this.to.y * this.progress, this.from.z);
@@ -913,8 +990,16 @@ class Wanderer{
         this.position.set(this.to.x + (1 - this.progress) * cos(dir), this.to.y + (1 - this.progress) * sin(dir), this.to.z);
       }
     }
+    */
   }
-  draw(grs){
+  setImg(){
+    // 画像を設定
+    // 0,1,2,3に向きごとに8種類入っててそれを切り出して貼り付ける
+    this.img.clear();
+    this.img.image(this.imgs, 0, 0, GRID, GRID, (this.durationCount / ANIMATION_SPAN | 0) * GRID,
+                   getImgId(this.direction) * GRID, GRID, GRID);
+  }
+  draw(areas){
     // grsのそれぞれについてフロア番号を調べて
     // オブジェクトが存在する辺の両端の頂点を調べて
     // 一致する場合にその頂点と存在する辺の情報に基づいて1個ないし2個描画する
@@ -925,11 +1010,27 @@ class Wanderer{
     // その方が楽
     // 今現在四角形にしてるエネミーも画像用意していろいろいじるつもり
     // 場合によって切り替える場合でも配列から取り出してその都度当てはめるようにすればメソッドは同じものが使える
-    for(let gr of grs){
-      const id = gr.getFloorId();
-      /* 帰ったらやる */
+    for(let _area of areas){
+      const id = _area.getFloorId();
+      let gr = _area.getBase();
+      if(id === this.position.z){
+        gr.image(this.img, this.position.x - GRID * 0.5, this.position.y - GRID * 0.5, GRID, GRID);
+      }
+      if(this.currentEdge.separate && (id === this.to.z)){
+        const _dir = this.currentEdge.getDir(1);
+        const _x = (this.to.x + (1 - this.progress) * cos(_dir)) * GRID;
+        const _y = (this.to.y + (1 - this.progress) * sin(_dir)) * GRID;
+        gr.image(this.img, _x - GRID * 0.5, _y - GRID * 0.5, GRID, GRID);
+      }
     }
   }
+}
+
+function getImgId(dir){
+  if(cos(dir) > 0.5){ return 0; }
+  else if(cos(dir) < -0.5){ return 2; }
+  else if(sin(dir) > 0.5){ return 1; }
+  return 3;
 }
 
 // directionの設定
@@ -942,6 +1043,7 @@ class Player extends Wanderer{
     this.jumpFlag = false;
     this.jumpHeight = 0;
     this.jumpCount = 0;
+    this.setImgs(slimeImages);
   }
   setEventFlag(flag){
     this.eventFlag = flag;
@@ -969,15 +1071,15 @@ class Player extends Wanderer{
   getJumpHeight(){
     return this.jumpHeight;
   }
-  update(){
-    this.advance();
-    this.setPosition();
-    this.jumpAdjustment();
+  setPosition(){
+    const dir = this.currentEdge.getDir(0);
+    this.position.set((this.from.x + this.progress * cos(dir)) * GRID,
+                      (this.from.y + this.progress * sin(dir)) * GRID - this.jumpHeight, this.from.z);
   }
-  setDirection(pos){
-    // posは画面内でのプレイヤーの位置(maze側から送る)
-    // マウス位置の取得情報はOFFSETでいじる（迷路ボードの表示位置）
-    this.direction = atan2(mouseY - OFFSET_X - pos.y, mouseX - OFFSET_Y - pos.x);
+  setDirection(_playerAreaOffSet){
+    // playerAreaの描画位置のオフセットに自身の位置を足して画面内での位置を出してさらにbaseを置くときのオフセットも考慮
+    this.direction = atan2(mouseY - OFFSET_Y - _playerAreaOffSet.y - this.position.y,
+                           mouseX - OFFSET_X - _playerAreaOffSet.x - this.position.x);
   }
   advance(){
     // prgを増減させる
@@ -1044,9 +1146,11 @@ class Player extends Wanderer{
 // 種類により辺の選び方が違ったりする？
 // 攻撃とかさせないでジャンプでかわす感じになりそう
 class Enemy extends Wanderer{
-  constructor(){
+  constructor(id){
     super();
     this.speed = 0.05;
+    this.enemyId = id;
+    this.setImgs(enemyImagesArray[id]);
   }
   advance(){
     const criterion = cos(this.direction - this.currentEdgeDirection); // 基本1か-1的な
@@ -1086,7 +1190,7 @@ class Enemy extends Wanderer{
 class Flag{
   constructor(_img){
     this.img = _img;
-    this.gr = createGraphics(FRAG_SIZE, FRAG_SIZE);
+    this.gr = createGraphics(FLAG_SIZE, FLAG_SIZE);
     this.gr.fill(128);
     this.gr.noStroke();
     this.durationCount = floor(random(FLAG_ROTATE_TERM));
@@ -1104,16 +1208,22 @@ class Flag{
       this.durationCount = 0;
     }
   }
-  draw(){
+  draw(areas){
     if(this.durationCount === 0){ return; } // よくわからんけど0でエラーが生じてるので暫定処理
     const progress = this.durationCount / FLAG_ROTATE_TERM;
     this.gr.clear();
-    const x = FRAG_SIZE * 0.5 * (1 - abs(sin(progress * TAU)));
-    const l = FRAG_SIZE - 2 * x;
+    const x = FLAG_SIZE * 0.5 * (1 - abs(sin(progress * TAU)));
+    const l = FLAG_SIZE - 2 * x;
     if(progress < 0.5){
-      this.gr.image(this.img, x, 0, l, FRAG_SIZE, 0, 0, FRAG_SIZE, FRAG_SIZE);
+      this.gr.image(this.img, x, 0, l, FLAG_SIZE, 0, 0, FLAG_SIZE, FLAG_SIZE);
     }else{
-      this.gr.rect(x, 0, l, FRAG_SIZE);
+      this.gr.rect(x, 0, l, FLAG_SIZE);
+    }
+    for(let _area of areas){
+      const id = _area.getFloorId();
+      let _gr = _area.getBase();
+      if(id !== this.position.z){ continue; }
+      _gr.image(this.gr, this.position.x * GRID - FLAG_SIZE * 0.5, this.position.y * GRID - FLAG_SIZE * 0.5, FLAG_SIZE, FLAG_SIZE);
     }
   }
 }
@@ -1121,6 +1231,7 @@ class Flag{
 function preload(){
   for(let i = 0; i < 4; i++){
     _SLIME.push(loadImage("https://inaridarkfox4231.github.io/assets/slime/slimes_" + i + ".png"));
+    _ENEMY.push(loadImage("https://inaridarkfox4231.github.io/assets/enemy/enemy_" + i + ".png"));
   }
 }
 
@@ -1128,6 +1239,7 @@ function setup(){
 	createCanvas(800, 640); // 2Dでやる
   prepareFlagImage();
   prepareSlimeImage();
+  prepareEnemyImage();
 
 	const data = createMazeData_1();
 	master = new Maze();
@@ -1150,26 +1262,32 @@ function draw(){
 function prepareFlagImage(){
   const texts = ["S", "1", "2", "3", "4", "5", "6", "7", "8", "9", "G"];
   for(let i = 0; i < 11; i++){
-    let gr = createGraphics(FRAG_SIZE, FRAG_SIZE);
+    let gr = createGraphics(FLAG_SIZE, FLAG_SIZE);
     gr.colorMode(HSB, 100);
     gr.noStroke();
     gr.background(220);
     gr.fill(i * 8, 100, 100);
-    gr.triangle(0, FRAG_SIZE, FRAG_SIZE, FRAG_SIZE, FRAG_SIZE, 0);
+    gr.triangle(0, FLAG_SIZE, FLAG_SIZE, FLAG_SIZE, FLAG_SIZE, 0);
     gr.fill(0);
     gr.textAlign(CENTER, CENTER);
-    gr.textSize(FRAG_SIZE * 0.5);
-    gr.text(texts[i], FRAG_SIZE * 0.25, FRAG_SIZE * 0.25);
-    _IMAGES.push(gr);
+    gr.textSize(FLAG_SIZE * 0.5);
+    gr.text(texts[i], FLAG_SIZE * 0.25, FLAG_SIZE * 0.25);
+    flagImages.push(gr);
   }
 }
 
 function prepareSlimeImage(){
+  slimeImages = createGraphics(GRID * 8, GRID * 4);
   for(let i = 0; i < 4; i++){
-    let gr = createGraphics(GRID * 8, GRID);
-    gr.image(_SLIME[i], 0, 0);
-    slimeImages.push(gr);
+    slimeImages.image(_SLIME[i], 0, GRID * i);
   }
+}
+function prepareEnemyImage(){
+  let gr = createGraphics(GRID * 8, GRID * 4);
+  for(let i = 0; i < 4; i++){
+    gr.image(_ENEMY[i], 0, GRID * i);
+  }
+  enemyImagesArray.push(gr);
 }
 
 function mouseClicked(){

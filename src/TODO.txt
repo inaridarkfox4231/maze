@@ -371,3 +371,6 @@ Areaが20個
 // areaにフロア番号付与するとか
 // phaseも付与するとか？
 // playerAreaとplayerAroundAreasをareaで書きたいのです
+
+// 迷路は機能してるけどおそらくオフセット関連がめちゃくちゃ
+// ですね
