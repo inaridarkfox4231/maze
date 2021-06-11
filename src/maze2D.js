@@ -902,7 +902,7 @@ class Player extends Wanderer{
   setDirection(pos){
     // posは画面内でのプレイヤーの位置(maze側から送る)
     // マウス位置の取得情報はOFFSETでいじる（迷路ボードの表示位置）
-    this.direction = atan2(mouseY - OFFSET_X - pos.y, mouseX - OFFSET_Y - pos.x);
+    this.direction = atan2(mouseY - OFFSET_Y - pos.y, mouseX - OFFSET_X - pos.x);
   }
   advance(){
     // prgを増減させる

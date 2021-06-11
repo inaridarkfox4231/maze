@@ -13,10 +13,12 @@ const FLAG_ROTATE_TERM = 120; // フラッグの回転のスパン
 // 迷路の基本サイズ
 const DISPLAY_WIDTH = 640;
 const DISPLAY_HEIGHT = 512;
+const AREA_WIDTH = 1280; // DISPLAYの2倍
+const AREA_HEIGHT = 1024;
 const GRID = 64; // グリッドサイズ
-const GRID_W = 10;
-const GRID_H = 8;
-const FLOOR_CAPACITY = 20;
+const GRID_W = 20; // 20x16が基本サイズ
+const GRID_H = 16;
+const FLOOR_CAPACITY = 16;  // 最大16枚
 
 // 表示のオフセット
 const OFFSET_X = 80;
@@ -433,14 +435,16 @@ class Maze{
   calcPlayerAreaOffSet(){
     // プレイヤーの存在するフロアを調べる
     const info = this.areas[this.player.position.z].getConnected();
-    const px = this.player.position.x;
-    const py = this.player.position.y;
-    const critX = (px > DISPLAY_WIDTH * 0.5);
-    const critY = (py > DISPLAY_HEIGHT * 0.5);
+    const x = this.player.position.x - DISPLAY_WIDTH * 0.5;
+    const y = this.player.position.y - DISPLAY_HEIGHT * 0.5;
+    const x1 = x / (DISPLAY_WIDTH * 0.5);
+    const y1 = y / (DISPLAY_HEIGHT * 0.5);
+    //const critX = (px > DISPLAY_WIDTH * 0.5);
+    //const critY = (py > DISPLAY_HEIGHT * 0.5);
     // playerAreaOffSetXは中央より右で右に何かある→半分-px,ない→0
     // 中央より左で左に何かある→半分-px,ない→0
-    this.playerAreaOffSet.set(((critX && info[0] >= 0) || (!critX && info[2] >= 0) ? DISPLAY_WIDTH * 0.5 - px : 0),
-                              ((critY && info[1] >= 0) || (!critY && info[3] >= 0) ? DISPLAY_HEIGHT * 0.5 - py : 0));
+    this.playerAreaOffSet.set((((x1>abs(y1)) && info[0] >= 0) || ((x1<-abs(y1)) && info[2] >= 0) ? -x : 0),
+                              (((y1>abs(x1)) && info[1] >= 0) || ((y1<-abs(x1)) && info[3] >= 0) ? -y : 0));
     // これにプレイヤーの位置を足すと画面内での位置が出る感じ
   }
   update(){
@@ -532,10 +536,26 @@ class Maze{
     // それをもとにアラウンドを描画
     // 完成！
 
+    const {x:ox, y:oy} = this.playerAreaOffSet;
+
     this.base.background(0); // あとで
-    this.base.image(this.playerArea.getBase(), this.playerAreaOffSet.x, this.playerAreaOffSet.y);
+    this.base.image(this.playerArea.getBase(), ox, oy);
     // こっから先は泥臭くやればいいんだよ
     // っていいつつ配列で書いちゃう
+    const _x = this.player.position.x - DISPLAY_WIDTH * 0.5;
+    const _y = this.player.position.y - DISPLAY_HEIGHT * 0.5;
+    const x1 = _x / (DISPLAY_WIDTH * 0.5);
+    const y1 = _y / (DISPLAY_HEIGHT * 0.5);
+    if(x1 > abs(y1) && info[0] >= 0){
+      this.base.image(this.playerAroundAreas[0].getBase(), ox + DISPLAY_WIDTH, oy);
+    }else if(x1 < -abs(y1) && info[2] >= 0){
+      this.base.image(this.playerAroundAreas[2].getBase(), ox - DISPLAY_WIDTH, oy);
+    }else if(y1 > abs(x1) && info[1] >= 0){
+      this.base.image(this.playerAroundAreas[1].getBase(), ox, oy + DISPLAY_HEIGHT);
+    }else if(y1 < -abs(x1) && info[3] >= 0){
+      this.base.image(this.playerAroundAreas[3].getBase(), ox, oy - DISPLAY_HEIGHT);
+    }
+    /*
     for(let i = 0; i < 4; i++){
       if(info[i] >= 0){
         this.base.image(this.playerAroundAreas[i].getBase(),
@@ -543,6 +563,7 @@ class Maze{
                         this.playerAreaOffSet.y + DISPLAY_HEIGHT * sin(TAU * i / 4));
       }
     }
+    */
 
     // ゆくゆくはプレイヤーの存在するフロアに応じたグラフィックが呼び出されて
     // プレイヤーの位置に応じてオフセット処理されたうえで描画される感じ
@@ -612,6 +633,10 @@ class Maze{
 // 以上
 
 // GRID_W * GRID_Hをn枚用意する
+
+// 20x16の中で四隅を除いた部分に頂点をおいて適当に接続する。大変。
+// 上段、中央、下段の順に並べていく。落ち着いて。
+// 紙の上で計算しないと無理
 function createBaseMazeData(n){
   let data = {};
   data.vNum = 0;
@@ -698,7 +723,7 @@ function createMazeData_0(){
 function createMazeData_1(){
   let data = createBaseMazeData(2);
   //mazeConnecting(data, [[0,0,0,0]]);
-  mazeConnecting(data, [[1,1,1,1], [0,0,0,0]]); // 作った迷路を右にドッキング
+  mazeConnecting(data, [[1,-1,1,1], [0,0,0,-1]]); // 作った迷路を右にドッキング
   // 上下左右調べてください
   // それが終わったら迷路の数を増やしてみてください
   // できたね
@@ -972,25 +997,28 @@ class Wanderer{
     // その場合progressによってプレイヤーが本来の場所からはみ出してしまう場合があるのだけど
     // その場合でも普通に表示はなされる
     // あとでseparateの場合にtoを追加すれば矛盾は生じない
+    /*
     const dir = this.currentEdge.getDir(0);
     this.position.set((this.from.x + this.progress * cos(dir)) * GRID,
                       (this.from.y + this.progress * sin(dir)) * GRID, this.from.z);
-    /*
+    */
+
     if(!this.currentEdge.separate){
-      this.position.set(this.from.x * (1 - this.progress) + this.to.x * this.progress,
-                      this.from.y * (1 - this.progress) + this.to.y * this.progress, this.from.z);
+      this.position.set(this.from.x * (1 - this.progress) * GRID + this.to.x * this.progress * GRID,
+                      this.from.y * (1 - this.progress) * GRID + this.to.y * this.progress * GRID, this.from.z);
     }else{
       let dir;
-      // そうか、GRID掛けちゃまずかったっけ・・反省・・
       if(this.progress < 0.5){
         dir = this.currentEdge.getDir(0);
-        this.position.set(this.from.x + this.progress * cos(dir), this.from.y + this.progress * sin(dir), this.from.z);
+        this.position.set((this.from.x + this.progress * cos(dir)) * GRID,
+                          (this.from.y + this.progress * sin(dir)) * GRID, this.from.z);
       }else{
         dir = this.currentEdge.getDir(1);
-        this.position.set(this.to.x + (1 - this.progress) * cos(dir), this.to.y + (1 - this.progress) * sin(dir), this.to.z);
+        this.position.set((this.to.x + (1 - this.progress) * cos(dir)) * GRID,
+                          (this.to.y + (1 - this.progress) * sin(dir)) * GRID, this.to.z);
       }
     }
-    */
+
   }
   setImg(){
     // 画像を設定
@@ -1016,11 +1044,19 @@ class Wanderer{
       if(id === this.position.z){
         gr.image(this.img, this.position.x - GRID * 0.5, this.position.y - GRID * 0.5, GRID, GRID);
       }
-      if(this.currentEdge.separate && (id === this.to.z)){
-        const _dir = this.currentEdge.getDir(1);
-        const _x = (this.to.x + (1 - this.progress) * cos(_dir)) * GRID;
-        const _y = (this.to.y + (1 - this.progress) * sin(_dir)) * GRID;
-        gr.image(this.img, _x - GRID * 0.5, _y - GRID * 0.5, GRID, GRID);
+      if(this.currentEdge.separate){
+        if(id === this.to.z){
+          const _dir = this.currentEdge.getDir(1);
+          const _x = (this.to.x + (1 - this.progress) * cos(_dir)) * GRID;
+          const _y = (this.to.y + (1 - this.progress) * sin(_dir)) * GRID;
+          gr.image(this.img, _x - GRID * 0.5, _y - GRID * 0.5, GRID, GRID);
+        }
+        if(id === this.from.z){
+          const _dir = this.currentEdge.getDir(0);
+          const _x = (this.from.x + this.progress * cos(_dir)) * GRID;
+          const _y = (this.from.y + this.progress * sin(_dir)) * GRID;
+          gr.image(this.img, _x - GRID * 0.5, _y - GRID * 0.5, GRID, GRID);
+        }
       }
     }
   }
@@ -1072,14 +1108,29 @@ class Player extends Wanderer{
     return this.jumpHeight;
   }
   setPosition(){
-    const dir = this.currentEdge.getDir(0);
-    this.position.set((this.from.x + this.progress * cos(dir)) * GRID,
-                      (this.from.y + this.progress * sin(dir)) * GRID - this.jumpHeight, this.from.z);
+    if(!this.currentEdge.separate){
+      this.position.set(this.from.x * (1 - this.progress) * GRID + this.to.x * this.progress * GRID,
+                      this.from.y * (1 - this.progress) * GRID + this.to.y * this.progress * GRID - this.jumpHeight, this.from.z);
+    }else{
+      let dir;
+      if(this.progress < 0.5){
+        dir = this.currentEdge.getDir(0);
+        this.position.set((this.from.x + this.progress * cos(dir)) * GRID,
+                          (this.from.y + this.progress * sin(dir)) * GRID - this.jumpHeight, this.from.z);
+      }else{
+        dir = this.currentEdge.getDir(1);
+        this.position.set((this.to.x + (1 - this.progress) * cos(dir)) * GRID,
+                          (this.to.y + (1 - this.progress) * sin(dir)) * GRID - this.jumpHeight, this.to.z);
+      }
+    }
   }
   setDirection(_playerAreaOffSet){
     // playerAreaの描画位置のオフセットに自身の位置を足して画面内での位置を出してさらにbaseを置くときのオフセットも考慮
+    /*
     this.direction = atan2(mouseY - OFFSET_Y - _playerAreaOffSet.y - this.position.y,
                            mouseX - OFFSET_X - _playerAreaOffSet.x - this.position.x);
+    */
+    this.direction = atan2(mouseY - height * 0.5, mouseX - width * 0.5); // これで。
   }
   advance(){
     // prgを増減させる
